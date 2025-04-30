@@ -33,3 +33,7 @@
 
 .idea
 cmake-build-debug
+utils/*.yy.cc
+utils/*.tab.*
+utils/*.hh
+utils/*.output
