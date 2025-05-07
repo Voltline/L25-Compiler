@@ -33,6 +33,7 @@
 
 .idea
 cmake-build-debug
+lexer.cpp
 *.yy.cc
 *.tab.*
 *.hh
