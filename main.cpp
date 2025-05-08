@@ -19,6 +19,8 @@ int main()
         return 1;
     }
 
+    rootExpr->print();
+
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder(context);
     llvm::Module module("toy_module", context);

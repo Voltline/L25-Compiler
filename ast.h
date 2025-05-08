@@ -69,3 +69,22 @@ struct BinaryExpr: Expr
         }
     }
 };
+
+// 标识符节点
+struct IdentExpr: Expr
+{
+    std::string ident;
+    IdentExpr(const std::string& ident) : ident(ident) {}
+
+    void print(int indent = 0) const override
+    {
+        std::cout << std::string(indent, ' ') << "Ident(" << ident << ")" << std::endl;
+    }
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override
+    {
+        // TODO: 符号表未实现，暂不实现codeGen
+        std::cerr << "暂未实现IdentExpr的codeGen" << std::endl;
+        return nullptr;
+    }
+};
