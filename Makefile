@@ -21,7 +21,7 @@ compiler.out: lexer.o parser.o ast.o main.o
 
 # Bison - 生成 parser.tab.cpp 和 parser.tab.h
 parser.tab.cpp parser.tab.h: parser.y
-	$(BISON) -d -o parser.tab.cpp parser.y
+	$(BISON) -d -t -v -o parser.tab.cpp parser.y
 
 # Flex - 生成 lexer.cpp
 lexer.cpp: lexer.l parser.tab.h

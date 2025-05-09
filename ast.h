@@ -7,84 +7,273 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 
-// 表达式节点
-struct Expr
-{
-    virtual ~Expr() = default;
-    virtual void print(int indent = 0) const = 0;
+struct ASTNode;
+struct Program;
+struct Func;
+struct Stmt;
+struct StmtList;
+struct DeclareStmt;
+struct AssignStmt;
+struct IfStmt;
+struct WhileStmt;
+struct FuncCallStmt;
+struct InputStmt;
+struct OutputStmt;
+struct Expr;
+struct BoolExpr;
+struct NumberExpr;
+struct UnaryExpr;
+struct BinaryExpr;
+struct IdentExpr;
+struct FuncCallExpr;
+struct ArgList;
+struct ParamList;
 
+// AST节点基类
+struct ASTNode
+{
+    virtual ~ASTNode() = default;
+
+    virtual void print(int indent = 0) const = 0;
+    // 必须实现codeGen
     virtual llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const = 0;
 };
 
-extern Expr* rootExpr;
-
-// 整数常量
-struct NumberExpr: Expr 
+// 程序节点
+struct Program: public ASTNode
 {
-    int value;
-    NumberExpr(int val) : value(val) {}
-    void print(int indent = 0) const override 
-    {
-        std::cout << std::string(indent, ' ') << "Number(" << value << ")" << std::endl;
-    }
+    std::unique_ptr<IdentExpr> name;
+    std::vector<std::unique_ptr<Func>> functions;
+    std::unique_ptr<StmtList> main_body;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override
-    {
-        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), value);
-    }
+    Program(std::unique_ptr<IdentExpr> name, std::vector<std::unique_ptr<Func>> functions, std::unique_ptr<StmtList> main_body);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
 };
 
-// 二元运算符
-struct BinaryExpr: Expr 
+// 函数节点
+struct Func: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<ParamList> params; // Nullable
+    std::unique_ptr<StmtList> stmts;
+    std::unique_ptr<Expr> return_value;
+
+    Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 语句节点
+struct Stmt: public ASTNode {};
+
+// 语句列表节点
+struct StmtList: public ASTNode
+{
+    std::vector<std::unique_ptr<Stmt>> stmts;
+
+    StmtList(std::vector<std::unique_ptr<Stmt>> stmts);
+    
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override ;
+};
+
+// 声明语句节点
+struct DeclareStmt: public Stmt
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<Expr> expr; // Nullable
+
+    DeclareStmt(std::unique_ptr<IdentExpr> name, std::unique_ptr<Expr> expr);
+    
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 赋值语句节点
+struct AssignStmt: public Stmt
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<Expr> expr;
+
+    AssignStmt(std::unique_ptr<IdentExpr> name, std::unique_ptr<Expr> expr);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 条件分支语句节点
+struct IfStmt: public Stmt {
+    std::unique_ptr<BoolExpr> condition;
+    std::unique_ptr<StmtList> if_body;
+    std::unique_ptr<StmtList> else_body; // Nullable
+
+    IfStmt(std::unique_ptr<BoolExpr> condition, std::unique_ptr<StmtList> if_body, std::unique_ptr<StmtList> else_body);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// While循环语句节点
+struct WhileStmt: public Stmt
+{
+    std::unique_ptr<BoolExpr> condition;
+    std::unique_ptr<StmtList> loop_body;
+
+    WhileStmt(std::unique_ptr<BoolExpr> condition, std::unique_ptr<StmtList> loop_body);
+    
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 函数调用语句节点
+struct FuncCallStmt: public Stmt
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<ArgList> args; // Nullable
+
+    FuncCallStmt(std::unique_ptr<IdentExpr> name, std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 输入语句节点
+struct InputStmt: public Stmt
+{
+    std::vector<std::unique_ptr<IdentExpr>> idents;
+
+    InputStmt(std::vector<std::unique_ptr<IdentExpr>> idents);
+
+    InputStmt(std::unique_ptr<ParamList> params);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 输出语句节点
+struct OutputStmt: public Stmt
+{
+    std::vector<std::unique_ptr<Expr>> idents;
+
+    OutputStmt(std::vector<std::unique_ptr<Expr>> idents);
+
+    OutputStmt(std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 表达式节点
+struct Expr: public ASTNode {};
+
+// Bool表达式节点
+struct BoolExpr: public ASTNode
+{
+    std::string symbol;
+    std::unique_ptr<Expr> lhs;
+    std::unique_ptr<Expr> rhs;
+
+    BoolExpr(std::string symbol, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 整数常量节点
+struct NumberExpr: public Expr 
+{
+    int value;
+    NumberExpr(int val);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 一元运算符节点
+struct UnaryExpr: public Expr
+{
+    char op;
+    std::unique_ptr<Expr> rhs;
+    UnaryExpr(char op, std::unique_ptr<Expr> rhs);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 二元运算符节点
+struct BinaryExpr: public Expr 
 {
     char op;
     std::unique_ptr<Expr> lhs, rhs;
-    BinaryExpr(char op, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs)
-        : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+    BinaryExpr(char op, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs);
 
-    void print(int indent = 0) const override
-    {
-        std::cout << std::string(indent, ' ') << "Binary(" << op << ")" << std::endl;
-        lhs->print(indent + 2);
-        rhs->print(indent + 2);
-    }
+    void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override
-    {
-        llvm::Value* LHS = lhs->codeGen(builder, context, module);
-        llvm::Value* RHS = rhs->codeGen(builder, context, module);
-        if (!LHS || !RHS) return nullptr;
-
-        switch (op) {
-        case '+':
-            return builder.CreateAdd(LHS, RHS, "addtmp");
-        case '-':
-            return builder.CreateSub(LHS, RHS, "addtmp");
-        case '*':
-            return builder.CreateMul(LHS, RHS, "addtmp");
-        case '/':
-            return builder.CreateSDiv(LHS, RHS, "addtmp");
-        default:
-            return nullptr;
-        }
-    }
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
 };
 
 // 标识符节点
-struct IdentExpr: Expr
+struct IdentExpr: public Expr
 {
     std::string ident;
-    IdentExpr(const std::string& ident) : ident(ident) {}
+    IdentExpr(const std::string& ident);
 
-    void print(int indent = 0) const override
-    {
-        std::cout << std::string(indent, ' ') << "Ident(" << ident << ")" << std::endl;
-    }
+    void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override
-    {
-        // TODO: 符号表未实现，暂不实现codeGen
-        std::cerr << "暂未实现IdentExpr的codeGen" << std::endl;
-        return nullptr;
-    }
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
 };
+
+// 函数调用表达式节点
+struct FuncCallExpr: public Expr
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<ArgList> args; // Nullable
+
+    FuncCallExpr(std::unique_ptr<IdentExpr> name, std::unique_ptr<ArgList> args);
+
+    FuncCallExpr(std::unique_ptr<FuncCallStmt> funcCallStmt);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+ 
+// 参数列表节点
+struct ArgList: public ASTNode
+{
+    std::vector<std::unique_ptr<Expr>> args;
+
+    ArgList(std::vector<std::unique_ptr<Expr>> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 形式参数列表节点
+struct ParamList: public ASTNode
+{
+    std::vector<std::unique_ptr<IdentExpr>> params;
+
+    ParamList(std::vector<std::unique_ptr<IdentExpr>> params);
+    
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+extern Program* rootProgram;

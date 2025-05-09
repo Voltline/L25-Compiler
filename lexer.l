@@ -22,13 +22,14 @@ ident {letter}({letter}|[0-9])*
 "input"     { return INPUT; }
 "output"    { return OUTPUT; }
 "return"    { return RETURN; }
+"null"      { return NULLSIGN; }
 
 {number}    { yylval.num = atoi(yytext); return NUMBER; }
 {ident}     { yylval.ident = new std::string{ yytext }; return IDENT; }
 
 "+"         { return PLUS; }
 "-"         { return MINUS; }
-"*"         { return MULTIPLY; }
+"*"         { return STAR; }
 "/"         { return DIVIDE; }
 "=="        { return EQ; }
 "!="        { return NEQ; }
@@ -37,11 +38,14 @@ ident {letter}({letter}|[0-9])*
 ">"         { return GT; }
 ">="        { return GE; }
 "="         { return ASSIGN; }
+"&"         { return ANDSIGN; }
 
 "("         { return LPAREN; }
 ")"         { return RPAREN; }
 "{"         { return LBRACE; }
 "}"         { return RBRACE; }
+"["         { return LBRACKET; }
+"]"         { return RBRACKET; }
 ";"         { return SEMICOLON; }
 ","         { return COMMA; }
 

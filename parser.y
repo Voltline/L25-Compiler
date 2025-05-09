@@ -7,60 +7,324 @@
 
 int yylex();
 void yyerror(const char* msg) { fprintf(stderr, "Error: %s\n", msg); }
-extern Expr* rootExpr;
+extern Program* rootProgram;
+extern int yydebug;
 %}
 
 %union {
     int num;
     std::string* ident;
     Expr* expr;
+    ParamList* paramList; // 函数定义与input共用
+    Stmt* stmt;
+    StmtList* stmtList;
+    Func* func;
+    Program* program;
+    std::vector<std::unique_ptr<Func>>* funcList;
+    BoolExpr* boolExpr;
+    ArgList* argList; // 函数调用与output共用
+    FuncCallStmt* funcCallStmt;
 }
 
 %debug
 
+%type <program> input
+
+%type <func> func
+%type <funcList> func_def_list
+%type <paramList> param_list
+%type <argList> arg_list
+
+%type <stmt> stmt
+%type <stmtList> stmt_list
+%type <stmt> declare_stmt
+%type <stmt> assign_stmt
+%type <stmt> if_stmt
+%type <stmt> while_stmt
+%type <stmt> input_stmt
+%type <stmt> output_stmt
+%type <funcCallStmt> func_call // 特殊处理
+
+%type <expr> expr
+%type <expr> term
+%type <expr> factor
+
+%type <boolExpr> bool_expr
+ 
 %token <num> NUMBER
 %token <ident> IDENT
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN
-%token PLUS MINUS MULTIPLY DIVIDE EQ NEQ LT LE GT GE ASSIGN
-%token LPAREN RPAREN LBRACE RBRACE SEMICOLON COMMA
+
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN
+%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN
+%token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET SEMICOLON COMMA
 %left PLUS MINUS
-%left MULTIPLY DIVIDE
-%type <expr> expr
+%left STAR DIVIDE
+
+%token UPLUS UMINUS DEREF
+%right UPLUS UMINUS
+%right DEREF
 
 %%
 input:
-    expr {
-        rootExpr = $1;
+    PROGRAM IDENT LBRACE func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    {
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::unique_ptr<StmtList>($7));
+        rootProgram = $$;
     }
-;
+    ;
+
+func_def_list
+    : func
+    {
+        $$ = new std::vector<std::unique_ptr<Func>>();
+        $$->push_back(std::unique_ptr<Func>($1));
+    }
+    | func_def_list func
+    {
+        $$ = $1;
+        $$->push_back(std::unique_ptr<Func>($2));
+    }
+    ;
+
+func:
+    FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    {
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+    }
+    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    {
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+    }
+    ;
+
+param_list:
+    IDENT
+    {
+        $$ = new ParamList(std::vector<std::unique_ptr<IdentExpr>>());
+        $$->params.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$1)));
+        delete $1;
+    }
+    | param_list COMMA IDENT
+    {
+        $$ = $1;
+        $$->params.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$3)));
+        delete $3;
+    }
+    ;
+
+stmt:
+    declare_stmt | assign_stmt | if_stmt | while_stmt | input_stmt | output_stmt | func_call
+    ;
+
+stmt_list:
+    stmt SEMICOLON
+    {
+        $$ = new StmtList(std::vector<std::unique_ptr<Stmt>>());
+        $$->stmts.push_back(std::unique_ptr<Stmt>($1));
+    }
+    | stmt_list stmt SEMICOLON
+    {
+        $$ = $1;
+        $$->stmts.push_back(std::unique_ptr<Stmt>($2));
+    }
+    ;
+
+declare_stmt:
+    LET IDENT
+    {
+        $$ = new DeclareStmt{
+            std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr
+        };
+    }
+    | LET IDENT ASSIGN expr
+    {
+        $$ = new DeclareStmt{
+            std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<Expr>($4)        
+        };
+    }
+    ;
+
+assign_stmt:
+    IDENT ASSIGN expr
+    {
+        $$ = new AssignStmt{
+            std::unique_ptr<IdentExpr>(new IdentExpr(*$1)), std::unique_ptr<Expr>($3)
+        };
+    }
+    ;
+
+if_stmt:
+    IF LPAREN bool_expr RPAREN LBRACE stmt_list RBRACE
+    {
+        $$ = new IfStmt{
+            std::unique_ptr<BoolExpr>($3), std::unique_ptr<StmtList>($6), nullptr
+        };
+    }
+    | IF LPAREN bool_expr RPAREN LBRACE stmt_list RBRACE ELSE LBRACE stmt_list RBRACE
+    {
+        $$ = new IfStmt{
+            std::unique_ptr<BoolExpr>($3), std::unique_ptr<StmtList>($6), std::unique_ptr<StmtList>($10)
+        };
+    }
+    ;
+
+while_stmt:
+    WHILE LPAREN bool_expr RPAREN LBRACE stmt_list RBRACE
+    {
+        $$ = new WhileStmt{
+            std::unique_ptr<BoolExpr>($3), std::unique_ptr<StmtList>($6)
+        };
+    }
+    ;
+
+func_call:
+    IDENT LPAREN RPAREN
+    {
+        $$ = new FuncCallStmt{
+            std::unique_ptr<IdentExpr>(new IdentExpr(*$1)), nullptr
+        };
+    }
+    | IDENT LPAREN arg_list RPAREN
+    {
+        $$ = new FuncCallStmt{
+            std::unique_ptr<IdentExpr>(new IdentExpr(*$1)), std::unique_ptr<ArgList>($3)
+        };
+    }
+    ;
+
+arg_list:
+    expr 
+    {
+        $$ = new ArgList(std::vector<std::unique_ptr<Expr>>());
+        $$->args.push_back(std::unique_ptr<Expr>($1));
+    }
+    | arg_list COMMA expr
+    {
+        $$ = $1;
+        $$->args.push_back(std::unique_ptr<Expr>($3));
+    }
+    ;
+
+input_stmt:
+    INPUT LPAREN param_list RPAREN
+    {
+        $$ = new InputStmt{ std::unique_ptr<ParamList>($3) };
+    }
+    ;
+
+output_stmt:
+    OUTPUT LPAREN arg_list RPAREN
+    {
+        $$ = new OutputStmt{ std::unique_ptr<ArgList>($3) };
+    } 
+    ;
+
+bool_expr:
+    expr EQ expr
+    {
+        $$ = new BoolExpr{
+            "==", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | expr NEQ expr
+    {
+        $$ = new BoolExpr{
+            "!=", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | expr LT expr
+    {
+        $$ = new BoolExpr{
+            "<", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | expr LE expr
+    {
+        $$ = new BoolExpr{
+            "<=", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | expr GT expr
+    {
+        $$ = new BoolExpr{
+            ">", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | expr GE expr
+    {
+        $$ = new BoolExpr{
+            ">=", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    ;
 
 expr:
-    expr PLUS expr  { 
-        $$ = new BinaryExpr{ 
-            '+', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3) 
+    PLUS term %prec UPLUS
+    {
+        $$ = new UnaryExpr{
+          '+', std::unique_ptr<Expr>($2)
         };
     }
-    | expr MINUS expr  { 
-        $$ = new BinaryExpr{ 
-            '-', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3) 
+    | MINUS term %prec UMINUS
+    {
+        $$ = new UnaryExpr{
+          '-', std::unique_ptr<Expr>($2)
         };
     }
-    | expr MULTIPLY expr {
-        $$ = new BinaryExpr{ 
-            '*', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3) 
+    | expr PLUS term
+    {
+        $$ = new BinaryExpr{
+            '+', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
     }
-    | expr DIVIDE expr {
-        $$ = new BinaryExpr{ 
-            '/', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3) 
+    | expr MINUS term
+    {
+        $$ = new BinaryExpr{
+            '-', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
     }
-    | NUMBER {
+    | term
+    {
+        $$ = $1;
+    }
+    ;
+
+term:
+    term STAR factor
+    {
+        $$ = new BinaryExpr{
+            '*', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | term DIVIDE factor
+    {
+        $$ = new BinaryExpr{
+            '/', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+    }
+    | factor
+    {
+        $$ = $1;
+    }
+    ;
+
+factor:
+    NUMBER
+    {
         $$ = new NumberExpr($1);
     }
-    | IDENT {
+    | IDENT
+    {
         $$ = new IdentExpr(*$1);
         delete $1;
+    }
+    | LPAREN expr RPAREN
+    {
+        $$ = $2;
+    }
+    | func_call
+    {
+        $$ = new FuncCallExpr{std::unique_ptr<FuncCallStmt>($1)};
     }
     ;
 %%

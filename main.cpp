@@ -7,19 +7,20 @@
 #include "parser.tab.hpp"
 
 extern int yyparse();
-Expr* rootExpr = nullptr;
+Program* rootProgram = nullptr;
 
 int main() 
 {
+    yydebug = 0;
     // 解析输入的表达式
     yyparse();
 
-    if (!rootExpr) {
+    if (!rootProgram) {
         std::cerr << "No expression parsed.\n";
         return 1;
     }
 
-    rootExpr->print();
+    rootProgram->print();
 
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder(context);
@@ -42,7 +43,7 @@ int main()
     builder.SetInsertPoint(entry);
 
     // 生成表达式并将其值打印出来
-    llvm::Value* val = rootExpr->codeGen(builder, context, module);
+    llvm::Value* val = rootProgram->codeGen(builder, context, module);
     if (!val) {
         std::cerr << "Code generation failed.\n";
         return 1;
@@ -65,7 +66,7 @@ int main()
     module.print(llvm::outs(), nullptr);  // 输出完整 IR
 
     // 清理资源
-    delete rootExpr;
+    delete rootProgram;
 
     return 0;
 }
