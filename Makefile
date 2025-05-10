@@ -16,8 +16,8 @@ LLVMFLAGS = -L$(LLVM_LIB) -lLLVM
 
 all: compiler.out
 
-compiler.out: lexer.o parser.o ast.o main.o
-	$(CXX) $(CXXFLAGS) $(LLVMFLAGS) -o compiler.out lexer.o parser.o ast.o main.o
+compiler.out: lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o 
+	$(CXX) $(CXXFLAGS) $(LLVMFLAGS) -o compiler.out lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o
 
 # Bison - 生成 parser.tab.cpp 和 parser.tab.h
 parser.tab.cpp parser.tab.h: parser.y
@@ -35,6 +35,12 @@ parser.o: parser.tab.cpp
 
 ast.o: ast.cpp ast.h
 	$(CXX) $(CXXFLAGS) -c ast.cpp
+
+symbol.o: symbol.cpp
+	$(CXX) $(CXXFLAGS) -c symbol.cpp
+
+semanticAnalysis.o: semanticAnalysis.cpp
+	$(CXX) $(CXXFLAGS) -c semanticAnalysis.cpp
 
 main.o: main.cpp
 	$(CXX) $(CXXFLAGS) -c main.cpp

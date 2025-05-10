@@ -1,5 +1,6 @@
 %{
 #include "ast.h"
+#include "symbol.h"
 #include <memory>
 #include <cstdio>
 #include <cstdlib>

@@ -4,6 +4,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include "ast.h"
+#include "semanticAnalysis.h"
 #include "parser.tab.hpp"
 
 extern int yyparse();
@@ -21,6 +22,11 @@ int main(int argc, const char* argv[])
     }
 
     rootProgram->print();
+
+    SemanticAnalyzer analyzer;
+    analyzer.analyze(*rootProgram);
+
+    std::cout << "语义检查完成" << std::endl;
 
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder(context);
