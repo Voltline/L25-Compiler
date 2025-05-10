@@ -15,7 +15,7 @@ extern int yydebug;
     int num;
     std::string* ident;
     Expr* expr;
-    ParamList* paramList; // 函数定义与input共用
+    ParamList* paramList; // 函数定义
     Stmt* stmt;
     StmtList* stmtList;
     Func* func;
@@ -24,6 +24,7 @@ extern int yydebug;
     BoolExpr* boolExpr;
     ArgList* argList; // 函数调用与output共用
     FuncCallStmt* funcCallStmt;
+    InputArgList* inputArgList; // input专用
 }
 
 %debug
@@ -34,6 +35,7 @@ extern int yydebug;
 %type <funcList> func_def_list
 %type <paramList> param_list
 %type <argList> arg_list
+%type <inputArgList> input_arg_list
 
 %type <stmt> stmt
 %type <stmtList> stmt_list
@@ -113,6 +115,21 @@ param_list:
     {
         $$ = $1;
         $$->params.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$3)));
+        delete $3;
+    }
+    ;
+
+input_arg_list:
+    IDENT
+    {
+        $$ = new InputArgList(std::vector<std::unique_ptr<IdentExpr>>());
+        $$->idents.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$1)));
+        delete $1;
+    }
+    | input_arg_list COMMA IDENT
+    {
+        $$ = $1;
+        $$->idents.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$3)));
         delete $3;
     }
     ;
@@ -215,9 +232,9 @@ arg_list:
     ;
 
 input_stmt:
-    INPUT LPAREN param_list RPAREN
+    INPUT LPAREN input_arg_list RPAREN
     {
-        $$ = new InputStmt{ std::unique_ptr<ParamList>($3) };
+        $$ = new InputStmt{ std::unique_ptr<InputArgList>($3) };
     }
     ;
 

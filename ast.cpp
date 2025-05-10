@@ -8,7 +8,7 @@ Program::Program(std::unique_ptr<IdentExpr> name, std::vector<std::unique_ptr<Fu
 
 void Program::print(int indent) const 
 {
-    std::cout << std::string(indent, ' ') << "Program(" << name << ")" << std::endl;
+    std::cout << std::string(indent, ' ') << "Program(" << *name << ")" << std::endl;
     for (const auto& func: functions) {
         func->print(indent + 2);
     }
@@ -162,8 +162,8 @@ llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
 InputStmt::InputStmt(std::vector<std::unique_ptr<IdentExpr>> idents)
     : idents(std::move(idents)) {}
 
-InputStmt::InputStmt(std::unique_ptr<ParamList> params)
-    : idents(std::move(params->params)) {}
+InputStmt::InputStmt(std::unique_ptr<InputArgList> args)
+    : idents(std::move(args->idents)) {}
 
 void InputStmt::print(int indent) const 
 {
@@ -250,7 +250,7 @@ llvm::Value* UnaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
     case '-':
         return builder.CreateNeg(RHS);
     default:
-        std::cerr << "其他运算符还没实现" << std::endl;
+        std::cerr << "暂未实现" << std::endl;
         return nullptr;
     }
 }
@@ -299,8 +299,7 @@ void IdentExpr::print(int indent) const
 
 llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    // TODO: 符号表未实现，暂不实现codeGen
-    std::cerr << "暂未实现IdentExpr的codeGen" << std::endl;
+    std::cerr << "暂未实现" << std::endl;
     return nullptr;
 }
 
@@ -340,8 +339,7 @@ void ArgList::print(int indent) const
 
 llvm::Value* ArgList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    // TODO: 符号表未实现，暂不实现codeGen
-    std::cerr << "暂未实现ArgList的codeGen" << std::endl;
+    std::cerr << "暂未实现" << std::endl;
     return nullptr;
 }
 
@@ -359,7 +357,24 @@ void ParamList::print(int indent) const
 
 llvm::Value* ParamList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    // TODO: 符号表未实现，暂不实现codeGen
-    std::cerr << "暂未实现ParamList的codeGen" << std::endl;
+    std::cerr << "暂未实现" << std::endl;
+    return nullptr;
+}
+
+// 输入函数参数列表节点
+InputArgList::InputArgList(std::vector<std::unique_ptr<IdentExpr>> idents)
+    : idents(std::move(idents)) {}
+
+void InputArgList::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Input Args" << std::endl;
+    for (const auto& ident: idents) {
+        ident->print(indent + 2);
+    }
+}
+
+llvm::Value* InputArgList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
+{
+    std::cerr << "暂未实现" << std::endl;
     return nullptr;
 }

@@ -28,6 +28,7 @@ struct IdentExpr;
 struct FuncCallExpr;
 struct ArgList;
 struct ParamList;
+struct InputArgList;
 
 // AST节点基类
 struct ASTNode
@@ -155,7 +156,7 @@ struct InputStmt: public Stmt
 
     InputStmt(std::vector<std::unique_ptr<IdentExpr>> idents);
 
-    InputStmt(std::unique_ptr<ParamList> params);
+    InputStmt(std::unique_ptr<InputArgList> args);
 
     void print(int indent = 0) const override;
 
@@ -235,6 +236,11 @@ struct IdentExpr: public Expr
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+
+    friend std::ostream& operator<<(std::ostream& os, const IdentExpr& ident) {
+        os << ident.ident;
+        return os;
+    }
 };
 
 // 函数调用表达式节点
@@ -271,6 +277,23 @@ struct ParamList: public ASTNode
 
     ParamList(std::vector<std::unique_ptr<IdentExpr>> params);
     
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
+// 输入函数参数列表节点
+/* 为什么要设计这个节点？
+ * Input在原始定义下可以与正常函数共用ParamList
+ * 但我扩展的语法中会出现指针和数组类型，这一块在ParamList里会体现，但Input不允许
+ * 因此使用一个只包含Ident的节点来表示输入函数专用的参数列表
+ */
+struct InputArgList: public ASTNode
+{
+    std::vector<std::unique_ptr<IdentExpr>> idents;
+
+    InputArgList(std::vector<std::unique_ptr<IdentExpr>> idents);
+
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
