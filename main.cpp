@@ -9,9 +9,9 @@
 extern int yyparse();
 Program* rootProgram = nullptr;
 
-int main() 
+int main(int argc, const char* argv[]) 
 {
-    yydebug = 0;
+    yydebug = argc != 1;
     // 解析输入的表达式
     yyparse();
 

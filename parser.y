@@ -66,7 +66,12 @@ extern int yydebug;
 
 %%
 input:
-    PROGRAM IDENT LBRACE func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    PROGRAM IDENT LBRACE MAIN LBRACE stmt_list RBRACE RBRACE
+    {
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($6));
+        rootProgram = $$;
+    }
+    | PROGRAM IDENT LBRACE func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
         $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::unique_ptr<StmtList>($7));
         rootProgram = $$;
@@ -113,7 +118,11 @@ param_list:
     ;
 
 stmt:
-    declare_stmt | assign_stmt | if_stmt | while_stmt | input_stmt | output_stmt | func_call
+    declare_stmt | assign_stmt | if_stmt | while_stmt | input_stmt | output_stmt 
+    | func_call
+    { // func_call是FuncCallStmt类型，到Stmt要隐式转换一次
+        $$ = $1;
+    }
     ;
 
 stmt_list:
