@@ -22,6 +22,8 @@ private:
     bool checkSameScopeSymbolExists(const std::string& name);
     bool checkSymbolExists(const std::string& name);
 
+    bool checkSymbolTypeMatch(const std::string& name, const TypeInfo& type);
+
     Scope* enterScope();
     void exitScope();
 };

@@ -296,6 +296,26 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
     // }
 }
 
+// 数组下标访问运算节点
+ArraySubscriptExpr::ArraySubscriptExpr(std::unique_ptr<IdentExpr> array, std::vector<int> subscript)
+    : array(std::move(array)), subscript(std::move(subscript)) {}
+
+void ArraySubscriptExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Array Subscript(" << array->ident << "[";
+    for (int i = 0; i < subscript.size(); i++) {
+        if (i != 0) std::cout << ",";
+        std::cout << subscript[i];
+    }
+    std::cout << "])" << std::endl;
+}
+
+llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
+{
+    std::cerr << "暂未实现" << std::endl;
+    return nullptr;
+}
+
 // 标识符节点
 IdentExpr::IdentExpr(const std::string& ident, TypeInfo type) : ident(ident), type(type) {}
 

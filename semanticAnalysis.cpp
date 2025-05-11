@@ -75,7 +75,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         if (checkSameScopeSymbolExists(decl->name->ident)) {
             std::cerr << decl->name->ident << " 已存在，出现重定义行为" << std::endl;
         } else {
-            SymbolInfo info{ SymbolKind::Int, decl->name->ident };
+            SymbolInfo info{ decl->name->ident, decl->name->type };
             declareSymbol(decl->name->ident, info);
         }
         if (decl->expr) {
@@ -135,11 +135,12 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
 {
     expr.scope = currentScope;
     if (auto ident = dynamic_cast<const IdentExpr*>(&expr)) {
+        // 最小操作单位ident，绑定或不绑定scope没有区别
         if (ident->ident.empty()) {
             std::cerr << "警告: IdentExpr 中的 ident 字符串为空！" << std::endl;
         }
 
-        if (!checkSameScopeSymbolExists(ident->ident)) {
+        if (!checkSymbolExists(ident->ident)) {
             std::cerr << ident->ident << " 不存在" << std::endl;
         }
     } else if (auto binary = dynamic_cast<const BinaryExpr*>(&expr)) {
@@ -156,6 +157,25 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             for (const auto& expr: funcCallExpr->args->args) {
                 analyzeExpr(*expr);
             }
+        }
+    } else if (auto subscript = dynamic_cast<const ArraySubscriptExpr*>(&expr)) {
+        analyzeExpr(*subscript->array);
+        // 数组符号
+        SymbolInfo* arraySymbol{ currentScope->lookup(subscript->array->ident) };
+        if (arraySymbol->kind != SymbolKind::Array) {
+            std::cerr << "尝试访问非数组变量" << arraySymbol->name << "的下标" << std::endl;
+            return;
+        }
+        if (arraySymbol->dimensions.size() == subscript->subscript.size()) {
+            for (int i = 0; i < subscript->subscript.size(); i++) {
+                if (!(arraySymbol->dimensions[i] > subscript->subscript[i])) {
+                    std::cerr << subscript->array->ident << "下标访问越界" << std::endl;
+                    return;
+                }
+            }
+        } else {
+            std::cerr << subscript->array->ident << "下标访问与数组维度不匹配" << std::endl;
+            return;
         }
     }
 }
@@ -177,6 +197,21 @@ bool SemanticAnalyzer::checkSameScopeSymbolExists(const std::string& name)
 bool SemanticAnalyzer::checkSymbolExists(const std::string& name)
 {
     return currentScope->lookup(name) != nullptr;
+}
+
+bool SemanticAnalyzer::checkSymbolTypeMatch(const std::string& name, const TypeInfo& type)
+{
+    if (!checkSymbolExists(name)) {
+        return false;
+    }
+    SymbolInfo* symbolInTable{ currentScope->lookup(name) };
+    if (symbolInTable->kind == type.kind) {
+        if (type.kind != SymbolKind::Array) {
+            return true;
+        }
+        return (type.dims == symbolInTable->dimensions);
+    }
+    return false;
 }
 
 Scope* SemanticAnalyzer::enterScope()

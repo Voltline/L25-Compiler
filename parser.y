@@ -53,6 +53,7 @@ extern int yydebug;
 %type <expr> expr
 %type <expr> term
 %type <expr> factor
+%type <expr> array_subscript_expr
 
 %type <boolExpr> bool_expr
 
@@ -387,6 +388,22 @@ factor:
     | func_call
     {
         $$ = new FuncCallExpr{std::unique_ptr<FuncCallStmt>($1)};
+    }
+    | array_subscript_expr
+    {
+        $$ = $1;
+    }
+    ;
+
+array_subscript_expr:
+    IDENT LBRACKET dim_list RBRACKET
+    {
+        $$ = new ArraySubscriptExpr{
+            std::make_unique<IdentExpr>(*$1, TypeInfo{ SymbolKind::Array, *$3 }),
+            *$3
+        };
+        delete $1;
+        delete $3;
     }
     ;
 

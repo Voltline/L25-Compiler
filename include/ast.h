@@ -244,6 +244,18 @@ struct BinaryExpr: public Expr
     llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
 };
 
+// 数组下标访问运算节点
+struct ArraySubscriptExpr: public Expr
+{
+    std::unique_ptr<IdentExpr> array;
+    std::vector<int> subscript;
+    ArraySubscriptExpr(std::unique_ptr<IdentExpr> array, std::vector<int> subscript);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+};
+
 // 标识符节点
 struct IdentExpr: public Expr
 {
