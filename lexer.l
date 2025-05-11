@@ -1,5 +1,5 @@
 %{
-#include "ast.h"
+#include "include/ast.h"
 #include "parser.tab.hpp"
 #include <cstdio>
 #include <cstdlib>

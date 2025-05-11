@@ -34,7 +34,7 @@ lexer.o: lexer.cpp
 parser.o: parser.tab.cpp
 	$(CXX) $(CXXFLAGS) -c parser.tab.cpp -o parser.o
 
-ast.o: ast.cpp ast.h
+ast.o: ast.cpp include/ast.h
 	$(CXX) $(CXXFLAGS) -c ast.cpp
 
 symbol.o: symbol.cpp

@@ -3,8 +3,8 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
-#include "ast.h"
-#include "semanticAnalysis.h"
+#include "include/ast.h"
+#include "include/semanticAnalysis.h"
 #include "parser.tab.hpp"
 
 extern int yyparse();
