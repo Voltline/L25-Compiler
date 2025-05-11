@@ -31,8 +31,7 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
             continue;
         }
 
-        SymbolInfo funcInfo{ SymbolKind::Function, funcName };
-        // TODO: 添加参数类型信息
+        SymbolInfo funcInfo{ funcName, *func };
         declareSymbol(funcName, funcInfo);
 
         validFuncs.push_back(func.get()); // 只记录合法函数
@@ -58,7 +57,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
     if (func.params) {
         for (const auto& param: func.params->params) {
             // TODO: 这里可能有求值存入value的需求
-            SymbolInfo paramInfo{ SymbolKind::Int, param->ident };
+            SymbolInfo paramInfo{ param->ident, param->type };
             declareSymbol(param->ident, paramInfo);
         }
     }

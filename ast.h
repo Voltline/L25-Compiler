@@ -30,6 +30,19 @@ struct FuncCallExpr;
 struct ArgList;
 struct ParamList;
 struct InputArgList;
+struct TypeInfo;
+enum class SymbolKind;
+class Scope;
+
+// 类型参数，不是AST节点
+struct TypeInfo
+{
+    SymbolKind kind; // 默认不使用
+    std::vector<int> dims; // 数组维度
+
+    TypeInfo();
+    TypeInfo(SymbolKind kind, std::vector<int> dims);
+};
 
 // AST节点基类
 struct ASTNode
@@ -41,7 +54,7 @@ struct ASTNode
     virtual llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const = 0;
 
     // 当前节点对应的作用域树节点
-    Scope* scope = nullptr; 
+    Scope* scope; 
 };
 
 // 程序节点
@@ -235,7 +248,8 @@ struct BinaryExpr: public Expr
 struct IdentExpr: public Expr
 {
     std::string ident;
-    IdentExpr(const std::string& ident);
+    TypeInfo type;
+    IdentExpr(const std::string& ident, TypeInfo type = TypeInfo());
 
     void print(int indent = 0) const override;
 

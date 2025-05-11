@@ -1,5 +1,12 @@
 #include "ast.h"
 
+// TypeInfo 方法
+TypeInfo::TypeInfo()
+    : kind(SymbolKind::Invalid), dims() {}
+
+TypeInfo::TypeInfo(SymbolKind kind, std::vector<int> dims)
+    : kind(kind), dims(std::move(dims)) {}
+
 // 程序节点
 Program::Program(std::unique_ptr<IdentExpr> name, std::vector<std::unique_ptr<Func>> functions, std::unique_ptr<StmtList> main_body)
     : name(std::move(name))
@@ -290,11 +297,31 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
 }
 
 // 标识符节点
-IdentExpr::IdentExpr(const std::string& ident) : ident(ident) {}
+IdentExpr::IdentExpr(const std::string& ident, TypeInfo type) : ident(ident), type(type) {}
 
 void IdentExpr::print(int indent) const 
 {
-    std::cout << std::string(indent, ' ') << "Ident(" << ident << ")" << std::endl;
+    switch (type.kind) {
+    case SymbolKind::Int:
+    case SymbolKind::Function:
+    case SymbolKind::Program:
+        std::cout << std::string(indent, ' ') 
+            << "Ident(" << ident << ": " 
+            << SymbolName[static_cast<int>(type.kind)] << ")" << std::endl;
+        break;
+    case SymbolKind::Array:
+        std::cout << std::string(indent, ' ') 
+            << "Ident(" << ident << ": Array[";
+        for (int i = 0; i < type.dims.size(); i++) {
+            if (i != 0) std::cout << ",";
+            std::cout << type.dims[i];
+        }
+        std::cout << "])" << std::endl;
+        break;
+    default:
+        std::cout << std::string(indent, ' ') 
+            << "Ident(" << ident << ")" << std::endl;
+    }
 }
 
 llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 

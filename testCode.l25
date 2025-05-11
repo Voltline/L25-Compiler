@@ -1,0 +1,15 @@
+program test {                                                               
+    func f1(a, b: int, c: [3,4], d) {
+        let e: [30];
+        return a + b + d;
+    }
+    func f2(a, b, c: int) {
+        let d: [30, 40, 50, 60];
+        return a + b + f1();
+    }
+    main {
+        let a: [30, 40, 50, 60, 70];
+        let b = f1() + f2();
+        let c: int = b;
+    }
+}

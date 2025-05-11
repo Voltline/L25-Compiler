@@ -23,6 +23,7 @@ ident {letter}({letter}|[0-9])*
 "output"    { return OUTPUT; }
 "return"    { return RETURN; }
 "null"      { return NULLSIGN; }
+"int"       { return INTSIGN; }
 
 {number}    { yylval.num = atoi(yytext); return NUMBER; }
 {ident}     { yylval.ident = new std::string{ yytext }; return IDENT; }
@@ -46,6 +47,7 @@ ident {letter}({letter}|[0-9])*
 "}"         { return RBRACE; }
 "["         { return LBRACKET; }
 "]"         { return RBRACKET; }
+":"         { return COLON; }
 ";"         { return SEMICOLON; }
 ","         { return COMMA; }
 

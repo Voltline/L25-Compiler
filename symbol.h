@@ -7,12 +7,15 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 
+struct TypeInfo;
+struct Func;
+
 enum class SymbolKind {
-    Int, Array, Function, Program
+    Int, Array, Function, Program, Invalid
 };
 
 const char* const SymbolName[] {
-    "Int", "Array", "Function", "Program"
+    "Int", "Array", "Function", "Program", "Invalid" 
 };
 
 struct SymbolInfo 
@@ -20,8 +23,12 @@ struct SymbolInfo
     SymbolKind kind;
     std::string name;                   // 对应ident节点的name
     std::vector<int> dimensions;        // 展平后的数组维度信息
-    std::vector<SymbolKind> paramTypes; // 函数参数类型信息
+    std::vector<TypeInfo> paramTypes; // 函数参数类型信息
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
+
+    SymbolInfo(SymbolKind kind, const std::string& name);
+    SymbolInfo(const std::string& name, const TypeInfo& type);
+    SymbolInfo(const std::string& name, const Func& func);
 };
 
 // 作用域

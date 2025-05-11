@@ -26,6 +26,8 @@ extern int yydebug;
     ArgList* argList; // 函数调用与output共用
     FuncCallStmt* funcCallStmt;
     InputArgList* inputArgList; // input专用
+    std::vector<int>* dims; // 数组维度信息
+    TypeInfo* typeInfo;  // 类型信息
 }
 
 %debug
@@ -53,13 +55,16 @@ extern int yydebug;
 %type <expr> factor
 
 %type <boolExpr> bool_expr
- 
+
+%type <dims> dim_list
+%type <typeInfo> type_info
+
 %token <num> NUMBER
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN
-%token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET SEMICOLON COMMA
+%token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
 %left STAR DIVIDE
 
@@ -109,14 +114,28 @@ param_list:
     IDENT
     {
         $$ = new ParamList(std::vector<std::unique_ptr<IdentExpr>>());
-        $$->params.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$1)));
+        $$->params.push_back(std::make_unique<IdentExpr>(*$1, TypeInfo{ SymbolKind::Int, {} }));
         delete $1;
+    }
+    | IDENT COLON type_info
+    {
+        $$ = new ParamList(std::vector<std::unique_ptr<IdentExpr>>());
+        $$->params.push_back(std::make_unique<IdentExpr>(*$1, *$3));
+        delete $1;
+        delete $3;
     }
     | param_list COMMA IDENT
     {
         $$ = $1;
-        $$->params.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$3)));
+        $$->params.push_back(std::make_unique<IdentExpr>(*$3, TypeInfo{ SymbolKind::Int, {} }));
         delete $3;
+    }
+    | param_list COMMA IDENT COLON type_info
+    {
+        $$ = $1;
+        $$->params.push_back(std::make_unique<IdentExpr>(*$3, *$5));
+        delete $3;
+        delete $5;
     }
     ;
 
@@ -124,13 +143,13 @@ input_arg_list:
     IDENT
     {
         $$ = new InputArgList(std::vector<std::unique_ptr<IdentExpr>>());
-        $$->idents.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$1)));
+        $$->idents.push_back(std::make_unique<IdentExpr>(*$1, TypeInfo{ SymbolKind::Int, {} }));
         delete $1;
     }
     | input_arg_list COMMA IDENT
     {
         $$ = $1;
-        $$->idents.push_back(std::unique_ptr<IdentExpr>(new IdentExpr(*$3)));
+        $$->idents.push_back(std::make_unique<IdentExpr>(*$3, TypeInfo{ SymbolKind::Int, {} }));
         delete $3;
     }
     ;
@@ -160,13 +179,29 @@ declare_stmt:
     LET IDENT
     {
         $$ = new DeclareStmt{
-            std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr
+            std::make_unique<IdentExpr>(*$2, TypeInfo{ SymbolKind::Int, {} }), 
+            nullptr
         };
     }
     | LET IDENT ASSIGN expr
     {
         $$ = new DeclareStmt{
-            std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<Expr>($4)        
+            std::make_unique<IdentExpr>(*$2, TypeInfo{ SymbolKind::Int, {} }), 
+            std::unique_ptr<Expr>($4)        
+        };
+    }
+    | LET IDENT COLON type_info
+    {
+        $$ = new DeclareStmt{
+            std::make_unique<IdentExpr>(*$2, *$4),
+            nullptr
+        };
+    }
+    | LET IDENT COLON type_info ASSIGN expr
+    {
+        $$ = new DeclareStmt{
+            std::make_unique<IdentExpr>(*$2, *$4),
+            std::unique_ptr<Expr>($6)
         };
     }
     ;
@@ -352,6 +387,31 @@ factor:
     | func_call
     {
         $$ = new FuncCallExpr{std::unique_ptr<FuncCallStmt>($1)};
+    }
+    ;
+
+dim_list:
+    NUMBER
+    {
+        $$ = new std::vector<int>();
+        $$->push_back($1);
+    }
+    | dim_list COMMA NUMBER
+    {
+        $$ = $1;
+        $$->push_back($3);
+    }
+    ;
+
+type_info:
+    INTSIGN
+    {
+        $$ = new TypeInfo{ SymbolKind::Int, {} };
+    }
+    |
+    LBRACKET dim_list RBRACKET
+    {
+        $$ = new TypeInfo{ SymbolKind::Array, *$2 };
     }
     ;
 %%
