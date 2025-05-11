@@ -1,4 +1,5 @@
 #pragma once
+#include "symbol.h"
 #include <memory>
 #include <string>
 #include <iostream>
@@ -38,6 +39,9 @@ struct ASTNode
     virtual void print(int indent = 0) const = 0;
     // 必须实现codeGen
     virtual llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const = 0;
+
+    // 当前节点对应的作用域树节点
+    Scope* scope = nullptr; 
 };
 
 // 程序节点

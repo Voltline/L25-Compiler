@@ -11,6 +11,10 @@ enum class SymbolKind {
     Int, Array, Function, Program
 };
 
+const char* const SymbolName[] {
+    "Int", "Array", "Function", "Program"
+};
+
 struct SymbolInfo 
 {
     SymbolKind kind;
@@ -20,34 +24,23 @@ struct SymbolInfo
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
 };
 
-class SymbolTable 
+// 作用域
+class Scope
 {
 public:
-    // 加入符号表方法
+    Scope(Scope* parent = nullptr);
+    // 本地及上层
+    SymbolInfo* lookup(const std::string& name);
+    // 本地
+    SymbolInfo* lookupLocal(const std::string& name);
     bool declare(const std::string& name, const SymbolInfo& info);
 
-    // 查询符号表方法
-    SymbolInfo* lookup(const std::string& name);
+    Scope* createChild();
+    Scope* getParent() const;
+
+    void print(int depth = 0) const;
 private:
-    // 用哈希表存储符号表
     std::unordered_map<std::string, SymbolInfo> table;
-};
-
-class SymbolTableManager
-{
-public:
-    // 进入下一层作用域方法
-    void enterScope();
-    // 离开当前作用域方法
-    void exitScope();
-
-    // 加入符号表方法(仅限当前作用域)
-    bool declare(const std::string& name, const SymbolInfo& info);
-    // 查询符号表方法(在当前及上层作用域)
-    SymbolInfo* lookup(const std::string& name);
-    // 同层查询符号表方法(仅在当前作用域)
-    SymbolInfo* lookupInplace(const std::string& name);
-private:
-    // 分作用域符号表
-    std::vector<SymbolTable> scopes;
+    std::vector<std::unique_ptr<Scope>> children;
+    Scope* parent;
 };

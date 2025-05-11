@@ -2,40 +2,60 @@
 
 /* SemanticAnalyzer 方法定义 */
 // Public
-void SemanticAnalyzer::analyze(const Program& program)
+void SemanticAnalyzer::analyze(Program& program)
 {
-    symbolManager.enterScope();
+    rootScope = std::make_unique<Scope>(nullptr);
+    
+    currentScope = rootScope.get();
     analyzeProgram(program);
-    symbolManager.exitScope();
+    currentScope = nullptr;
 }
 
 // Private
-void SemanticAnalyzer::analyzeProgram(const Program& program)
+void SemanticAnalyzer::analyzeProgram(Program& program)
 {
+    program.scope = currentScope;
+    // 声明程序名为一个特殊符号
     SymbolInfo progInfo{ SymbolKind::Program, program.name->ident };
     declareSymbol(program.name->ident, progInfo);
-    // 先做符号表生成
-    for (const auto& func: program.functions) {
-        SymbolInfo funcInfo{ SymbolKind::Function, program.name->ident };
-        // TODO: 函数参数类型列表还没做
-        declareSymbol(func->name->ident, funcInfo);
+
+    // 存储合法函数以便后续语义分析
+    std::vector<Func*> validFuncs;
+
+    // 第一步：构建函数的符号表
+    for (auto& func : program.functions) {
+        const std::string& funcName = func->name->ident;
+
+        if (checkSameScopeSymbolExists(funcName)) {
+            std::cerr << "错误: 函数 " << funcName << " 重定义" << std::endl;
+            continue;
+        }
+
+        SymbolInfo funcInfo{ SymbolKind::Function, funcName };
+        // TODO: 添加参数类型信息
+        declareSymbol(funcName, funcInfo);
+
+        validFuncs.push_back(func.get()); // 只记录合法函数
     }
 
-    // 再对函数内符号表单独语义分析
-    for (const auto& func: program.functions) {
+    // 第二步：分析合法函数体
+    for (auto* func : validFuncs) {
         analyzeFunc(*func);
     }
 
-    // 再对每个Stmt单独做语义分析
-    for (const auto& stmt: program.main_body->stmts) {
+    // 第三步：分析 main 函数体
+    enterScope();
+    for (auto& stmt : program.main_body->stmts) {
         analyzeStmt(*stmt);
     }
+    exitScope();
 }
 
-void SemanticAnalyzer::analyzeFunc(const Func& func)
+void SemanticAnalyzer::analyzeFunc(Func& func)
 {
-    symbolManager.enterScope();    
-    if (!func.params->params.empty()) {
+    func.scope = currentScope;
+    enterScope();    
+    if (func.params) {
         for (const auto& param: func.params->params) {
             // TODO: 这里可能有求值存入value的需求
             SymbolInfo paramInfo{ SymbolKind::Int, param->ident };
@@ -46,11 +66,12 @@ void SemanticAnalyzer::analyzeFunc(const Func& func)
         analyzeStmt(*stmt);
     }
     analyzeExpr(*func.return_value);
-    symbolManager.exitScope();
+    exitScope();
 }
 
-void SemanticAnalyzer::analyzeStmt(const Stmt& stmt)
+void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
 {
+    stmt.scope = currentScope;
     if (auto decl = dynamic_cast<const DeclareStmt*>(&stmt)) {
         if (checkSameScopeSymbolExists(decl->name->ident)) {
             std::cerr << decl->name->ident << " 已存在，出现重定义行为" << std::endl;
@@ -91,6 +112,7 @@ void SemanticAnalyzer::analyzeStmt(const Stmt& stmt)
     } else if (auto funcCallStmt = dynamic_cast<const FuncCallStmt*>(&stmt)) {
         if (!checkSymbolExists(funcCallStmt->name->ident)) {
             std::cerr << funcCallStmt->name->ident << " 函数未定义" << std::endl;
+            return;
         }
         if (funcCallStmt->args) {
             for (const auto& expr: funcCallStmt->args->args) {
@@ -110,9 +132,14 @@ void SemanticAnalyzer::analyzeStmt(const Stmt& stmt)
     }
 }
 
-void SemanticAnalyzer::analyzeExpr(const Expr& expr)
+void SemanticAnalyzer::analyzeExpr(Expr& expr)
 {
+    expr.scope = currentScope;
     if (auto ident = dynamic_cast<const IdentExpr*>(&expr)) {
+        if (ident->ident.empty()) {
+            std::cerr << "警告: IdentExpr 中的 ident 字符串为空！" << std::endl;
+        }
+
         if (!checkSameScopeSymbolExists(ident->ident)) {
             std::cerr << ident->ident << " 不存在" << std::endl;
         }
@@ -124,6 +151,7 @@ void SemanticAnalyzer::analyzeExpr(const Expr& expr)
     } else if (auto funcCallExpr = dynamic_cast<const FuncCallExpr*>(&expr)) {
         if (!checkSymbolExists(funcCallExpr->name->ident)) {
             std::cerr << funcCallExpr->name->ident << " 函数未定义" << std::endl;
+            return;
         }
         if (funcCallExpr->args) {
             for (const auto& expr: funcCallExpr->args->args) {
@@ -135,15 +163,34 @@ void SemanticAnalyzer::analyzeExpr(const Expr& expr)
 
 void SemanticAnalyzer::declareSymbol(const std::string& name, const SymbolInfo& info)
 {
-    symbolManager.declare(name, info);
+    if (!currentScope) {
+        std::cerr << "错误: 作用域未初始化，无法声明符号" << name << std::endl;
+        return;
+    }
+    currentScope->declare(name, info);
 }
 
 bool SemanticAnalyzer::checkSameScopeSymbolExists(const std::string& name)
 {
-    return symbolManager.lookupInplace(name) != nullptr;
+    return currentScope->lookupLocal(name) != nullptr;
 }
 
 bool SemanticAnalyzer::checkSymbolExists(const std::string& name)
 {
-    return symbolManager.lookup(name) != nullptr;
+    return currentScope->lookup(name) != nullptr;
+}
+
+Scope* SemanticAnalyzer::enterScope()
+{
+    currentScope = currentScope->createChild();
+    return currentScope;
+}
+
+void SemanticAnalyzer::exitScope()
+{
+    if (!currentScope) {
+        std::cerr << "错误: 已位于全局作用域, 无法退出" << std::endl;
+        return;
+    }
+    currentScope = currentScope->getParent();
 }

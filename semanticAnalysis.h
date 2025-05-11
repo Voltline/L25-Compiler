@@ -7,19 +7,21 @@
 class SemanticAnalyzer
 {
 public:
-    void analyze(const Program& program);
-
+    void analyze(Program& program);
+    std::unique_ptr<Scope> rootScope = nullptr;
 private:
-    SymbolTableManager symbolManager;
+    Scope* currentScope = nullptr;
 
-    void analyzeProgram(const Program& program);
-    void analyzeFunc(const Func& func);
-    void analyzeStmt(const Stmt& stmt);
-    void analyzeExpr(const Expr& expr);
+    void analyzeProgram(Program& program);
+    void analyzeFunc(Func& func);
+    void analyzeStmt(Stmt& stmt);
+    void analyzeExpr(Expr& expr);
 
-    // 第三个参数用于描述数组维度
     void declareSymbol(const std::string& name, const SymbolInfo& info);
 
     bool checkSameScopeSymbolExists(const std::string& name);
     bool checkSymbolExists(const std::string& name);
+
+    Scope* enterScope();
+    void exitScope();
 };

@@ -2,7 +2,7 @@
 LLVM_INCLUDE = /opt/homebrew/Cellar/llvm/20.1.4/include
 LLVM_LIB = /opt/homebrew/Cellar/llvm/20.1.4/lib
 
-CXXFLAGS += -I$(LLVM_INCLUDE) 
+CXXFLAGS += -I$(LLVM_INCLUDE)  
 
 # 使用Clang++编译器和Flex、Bison路径
 CXX = clang++
@@ -11,7 +11,8 @@ BISON = /opt/homebrew/Cellar/bison/3.8.2/bin/bison
 
 CXXFLAGS += -std=c++17 \
 			-Wall \
-			-I/opt/homebrew/Cellar/flex/2.6.4_2/include
+			-I/opt/homebrew/Cellar/flex/2.6.4_2/include \
+			-g
 LLVMFLAGS = -L$(LLVM_LIB) -lLLVM
 
 all: compiler.out

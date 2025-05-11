@@ -28,6 +28,9 @@ int main(int argc, const char* argv[])
 
     std::cout << "语义检查完成" << std::endl;
 
+    std::cout << "rootProgram->scope" << rootProgram->scope << std::endl;
+    rootProgram->scope->print();
+
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder(context);
     llvm::Module module("toy_module", context);
