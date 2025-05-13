@@ -62,6 +62,18 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
         }
     }
     for (const auto& stmt: func.stmts->stmts) {
+        // 基于RTTI检查这条stmt是否有可能是函数定义，如果是函数定义要扩展符号表
+        if (auto funcDefStmt = dynamic_cast<const Func*>(stmt.get())) {
+            const std::string& funcName = funcDefStmt->name->ident;
+
+            if (checkSameScopeSymbolExists(funcName)) {
+                std::cerr << "错误: 函数 " << funcName << " 重定义" << std::endl;
+                continue;
+            }
+
+            SymbolInfo funcInfo{ funcName, *funcDefStmt };
+            declareSymbol(funcName, funcInfo);
+        }
         analyzeStmt(*stmt);
     }
     analyzeExpr(*func.return_value);
@@ -128,6 +140,8 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         for (const auto& expr: outputStmt->idents) {
             analyzeExpr(*expr);
         }
+    } else if (auto funcDefStmt = dynamic_cast<Func*>(&stmt)) {
+        analyzeFunc(*funcDefStmt);
     }
 }
 
@@ -153,7 +167,26 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             std::cerr << funcCallExpr->name->ident << " 函数未定义" << std::endl;
             return;
         }
+        // 函数符号
+        SymbolInfo* funcSymbol{ currentScope->lookup(funcCallExpr->name->ident) };
+        if (!funcCallExpr->args) {
+            if (!funcSymbol->paramTypes.empty()) {
+                std::cerr << funcCallExpr->name->ident << " 调用需要" 
+                    << funcSymbol->paramTypes.size() << "个参数，但调用时未传入参数" 
+                    << std::endl;
+                return;
+            }
+        }
+
         if (funcCallExpr->args) {
+            if (funcCallExpr->args->args.size() != funcSymbol->paramTypes.size()) {
+                std::cerr << funcCallExpr->name->ident << " 调用需要"
+                    << funcSymbol->paramTypes.size() << "个参数，但调用时传入"
+                    << funcCallExpr->args->args.size() << "个参数"
+                    << std::endl;
+                    return;
+            }
+            // TODO: 加上参数对应类型检查，这里还有数组传入的问题
             for (const auto& expr: funcCallExpr->args->args) {
                 analyzeExpr(*expr);
             }

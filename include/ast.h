@@ -71,8 +71,11 @@ struct Program: public ASTNode
     llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
 };
 
-// 函数节点
-struct Func: public ASTNode
+// 语句节点
+struct Stmt: public ASTNode {};
+
+// 函数定义节点
+struct Func: public Stmt
 {
     std::unique_ptr<IdentExpr> name;
     std::unique_ptr<ParamList> params; // Nullable
@@ -85,9 +88,6 @@ struct Func: public ASTNode
 
     llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
 };
-
-// 语句节点
-struct Stmt: public ASTNode {};
 
 // 语句列表节点
 struct StmtList: public ASTNode

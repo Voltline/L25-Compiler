@@ -28,6 +28,7 @@ extern int yydebug;
     InputArgList* inputArgList; // input专用
     std::vector<int>* dims; // 数组维度信息
     TypeInfo* typeInfo;  // 类型信息
+    Func* nestedFuncStmt; // 嵌套函数定义语句
 }
 
 %debug
@@ -49,6 +50,7 @@ extern int yydebug;
 %type <stmt> input_stmt
 %type <stmt> output_stmt
 %type <funcCallStmt> func_call // 特殊处理
+%type <nestedFuncStmt> nested_func_stmt
 
 %type <expr> expr
 %type <expr> term
@@ -111,6 +113,17 @@ func:
     }
     ;
 
+nested_func_stmt:
+    FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    {
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+    }
+    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    {
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+    }
+    ;
+
 param_list:
     IDENT
     {
@@ -159,6 +172,10 @@ stmt:
     declare_stmt | assign_stmt | if_stmt | while_stmt | input_stmt | output_stmt 
     | func_call
     { // func_call是FuncCallStmt类型，到Stmt要隐式转换一次
+        $$ = $1;
+    }
+    | nested_func_stmt
+    {
         $$ = $1;
     }
     ;
