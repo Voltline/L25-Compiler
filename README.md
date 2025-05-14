@@ -8,7 +8,9 @@
 ## Grammar
 > L25 Grammar with EBNF description
 ```
-<program> = "program" <ident> "{" { <func_def> } "main" "{" <stmt_list> "}" "}"
+<program> = "program" <ident> "{" <func_def_list> "main" "{" <stmt_list> "}" "}"
+
+<func_def_list> = <func_def> { <func_def> }
 
 <func_def> = "func" <ident> "(" [ <param_list> ] ")" "{" <stmt_list> "return" <expr> ";" "}"
 

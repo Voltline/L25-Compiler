@@ -169,7 +169,7 @@ input_arg_list:
     ;
 
 stmt:
-    declare_stmt | assign_stmt | if_stmt | while_stmt | input_stmt | output_stmt 
+    declare_stmt | assign_stmt | if_stmt | while_stmt | input_stmt | output_stmt
     | func_call
     { // func_call是FuncCallStmt类型，到Stmt要隐式转换一次
         $$ = $1;
@@ -228,7 +228,8 @@ assign_stmt:
     IDENT ASSIGN expr
     {
         $$ = new AssignStmt{
-            std::unique_ptr<IdentExpr>(new IdentExpr(*$1)), std::unique_ptr<Expr>($3)
+            std::make_unique<IdentExpr>(*$1),
+            std::unique_ptr<Expr>($3)
         };
     }
     ;

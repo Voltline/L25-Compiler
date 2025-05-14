@@ -23,9 +23,9 @@ struct SymbolInfo
     SymbolKind kind;
     std::string name;                   // 对应ident节点的name
     std::vector<int> dimensions;        // 展平后的数组维度信息
-    std::vector<TypeInfo> paramTypes; // 函数参数类型信息
+    std::vector<TypeInfo> paramTypes;   // 函数参数类型信息
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
-
+    
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);
     SymbolInfo(const std::string& name, const Func& func);
@@ -44,6 +44,8 @@ public:
 
     Scope* createChild();
     Scope* getParent() const;
+
+    void remove(const std::string& name);
 
     void print(int depth = 0) const;
 private:

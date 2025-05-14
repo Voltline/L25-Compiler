@@ -61,7 +61,8 @@ Scope* Scope::getParent() const
     return parent;
 }
 
-void Scope::print(int depth) const {
+void Scope::print(int depth) const 
+{
     std::string indent(depth, ' ');  // 通过空格缩进表示层级
     std::cout << indent << "Scope {" << std::endl;
 
