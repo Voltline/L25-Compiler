@@ -232,6 +232,14 @@ assign_stmt:
             std::unique_ptr<Expr>($3)
         };
     }
+    | array_subscript_expr ASSIGN expr
+    {
+        
+        $$ = new AssignStmt{
+            std::make_unique<ArraySubscriptExpr>(std::move(static_cast<ArraySubscriptExpr*>($1)->array), std::move(static_cast<ArraySubscriptExpr*>($1)->subscript)),
+            std::unique_ptr<Expr>($3)
+        };
+    }
     ;
 
 if_stmt:

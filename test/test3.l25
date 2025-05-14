@@ -3,6 +3,12 @@ program test {
         let a;
         let b: [3,4,5];
         input(a);
+        b[1,2,3] = 1;
+        if (a > 3) {
+            a = 12345;
+        } else {
+            a = 23333;
+        };
         output(b[1,2,3]);
         output(a);
         output(5*6+3, 3*(4+6*(8-5)));

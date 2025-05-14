@@ -86,10 +86,20 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeExpr(*decl->expr);
         }
     } else if (auto assign = dynamic_cast<const AssignStmt*>(&stmt)) {
-        if (!checkSymbolExists(assign->name->ident)) {
-            std::cerr << assign->name->ident << " 未声明" << std::endl;
+        if (auto normalVarAssign = dynamic_cast<const IdentExpr*>(assign->name.get())) {
+            if (!checkSymbolExists(normalVarAssign->ident)) {
+                std::cerr << normalVarAssign->ident << " 未声明" << std::endl;
+                return;
+            }
+            analyzeExpr(*assign->expr);
+        } else if (auto arrayAssign = dynamic_cast<ArraySubscriptExpr*>(assign->name.get())) {
+            if (!checkSymbolExists(arrayAssign->array->ident)) {
+                std::cerr << arrayAssign->array->ident << " 未声明" << std::endl;
+                return;
+            }
+            analyzeExpr(*arrayAssign);
+            analyzeExpr(*assign->expr);
         }
-        analyzeExpr(*assign->expr);
     } else if (auto ifStmt = dynamic_cast<const IfStmt*>(&stmt)) {
         const auto& boolExpr = *ifStmt->condition;
         analyzeExpr(*boolExpr.lhs);

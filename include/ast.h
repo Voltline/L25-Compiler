@@ -117,10 +117,10 @@ struct DeclareStmt: public Stmt
 // 赋值语句节点
 struct AssignStmt: public Stmt
 {
-    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<Expr> name;
     std::unique_ptr<Expr> expr;
 
-    AssignStmt(std::unique_ptr<IdentExpr> name, std::unique_ptr<Expr> expr);
+    AssignStmt(std::unique_ptr<Expr> name, std::unique_ptr<Expr> expr);
 
     void print(int indent = 0) const override;
 
@@ -254,6 +254,7 @@ struct ArraySubscriptExpr: public Expr
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* getAddress(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const;
 };
 
 // 标识符节点

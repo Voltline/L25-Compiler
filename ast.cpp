@@ -188,7 +188,7 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
 }
 
 // 赋值语句节点
-AssignStmt::AssignStmt(std::unique_ptr<IdentExpr> name, std::unique_ptr<Expr> expr)
+AssignStmt::AssignStmt(std::unique_ptr<Expr> name, std::unique_ptr<Expr> expr)
     : name(std::move(name)), expr(std::move(expr)) {}
 
 void AssignStmt::print(int indent) const  
@@ -200,8 +200,38 @@ void AssignStmt::print(int indent) const
 
 llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    llvm::Value* rhs = expr->codeGen(builder, context, module);
+    if (!rhs) {
+        std::cerr << "错误：赋值右侧表达式生成失败" << std::endl;
+        return nullptr;
+    }
+
+    llvm::Value* lhsAddr = nullptr;
+    
+    // 普通变量
+    if (auto identExpr = dynamic_cast<IdentExpr*>(name.get())) {
+        SymbolInfo* symbol = scope->lookup(identExpr->ident);
+        if (!symbol || !symbol->addr) {
+            std::cerr << "错误：变量未声明或未分配空间：" << identExpr->ident << std::endl;
+            return nullptr;
+        }
+        lhsAddr = symbol->addr;
+    } else if (auto arrayExpr = dynamic_cast<ArraySubscriptExpr*>(name.get())) {
+        lhsAddr = arrayExpr->getAddress(builder, context, module);
+        if (!lhsAddr) {
+            std::cerr << "错误：获取数组元素地址失败" << std::endl;
+            return nullptr;
+        }
+    } else {
+        std::cerr << "错误：左值类型错误" << std::endl;
+        return nullptr;
+    }
+
+    if (!lhsAddr) {
+
+    }
+    builder.CreateStore(rhs, lhsAddr);
+    return rhs;
 }
 
 // 条件分支语句节点
@@ -222,7 +252,49 @@ void IfStmt::print(int indent) const
 
 llvm::Value* IfStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
+    llvm::Function* function = builder.GetInsertBlock()->getParent();
+
+    llvm::Value* condValue = condition->codeGen(builder, context, module);
+    if (!condValue) {
+        std::cerr << "错误：if条件表达式生成失败" << std::endl;
+        return nullptr;
+    }
+
+    // 创建基本块
+    llvm::BasicBlock* ifBody = llvm::BasicBlock::Create(context, "if.then", function);
+    llvm::BasicBlock* elseBody = else_body ? llvm::BasicBlock::Create(context, "if.else") : nullptr;
+    llvm::BasicBlock* merge = llvm::BasicBlock::Create(context, "if.end");
+
+    // 创建条件跳转
+    if (elseBody) {
+        builder.CreateCondBr(condValue, ifBody, elseBody);
+    } else {
+        builder.CreateCondBr(condValue, ifBody, merge);
+    }
+
+    // if-body
+    builder.SetInsertPoint(ifBody);
+    if (if_body) {
+        if_body->codeGen(builder, context, module);
+    }
+    if (!ifBody->getTerminator()) {
+        builder.CreateBr(merge);
+    }
+
+    // else-body
+    if (elseBody) {
+        function->insert(function->end(), elseBody);
+        builder.SetInsertPoint(elseBody);
+        else_body->codeGen(builder, context, module);
+        if (!elseBody->getTerminator()) {
+            builder.CreateBr(merge);
+        }
+    }
+
+    // merge block
+    function->insert(function->end(), merge);
+    builder.SetInsertPoint(merge);
+
     return nullptr;
 }
 
@@ -368,8 +440,35 @@ void BoolExpr::print(int indent) const
 
 llvm::Value* BoolExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    llvm::Value* lhsVal = lhs->codeGen(builder, context, module);
+    llvm::Value* rhsVal = rhs->codeGen(builder, context, module);
+
+    if (!lhsVal || !rhsVal) {
+        std::cerr << "错误：布尔表达式左右子表达式生成失败" << std::endl;
+        return nullptr;
+    }
+
+    if (lhsVal->getType()->isIntegerTy() && rhsVal->getType()->isIntegerTy()) {
+        if (symbol == "==") {
+            return builder.CreateICmpEQ(lhsVal, rhsVal, "cmpeq");
+        } else if (symbol == "!=") {
+            return builder.CreateICmpNE(lhsVal, rhsVal, "cmpne");
+        } else if (symbol == "<") {
+            return builder.CreateICmpSLT(lhsVal, rhsVal, "cmplt");
+        } else if (symbol == "<=") {
+            return builder.CreateICmpSLE(lhsVal, rhsVal, "cmple");
+        } else if (symbol == ">") {
+            return builder.CreateICmpSGT(lhsVal, rhsVal, "cmpgt");
+        } else if (symbol == ">=") {
+            return builder.CreateICmpSGE(lhsVal, rhsVal, "cmpge");
+        } else {
+            std::cerr << "错误：不支持的布尔操作符 " << symbol << std::endl;
+            return nullptr;
+        }
+    } else {
+        std::cerr << "错误：暂不支持非整数类型的布尔比较" << std::endl;
+        return nullptr;
+    }
 }
 
 // 整数常量节点
@@ -495,6 +594,40 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
 
     llvm::Type* valueType = llvm::Type::getInt32Ty(context);
     return builder.CreateLoad(valueType, gep, "load_elem");
+}
+
+llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
+    SymbolInfo* symbol = scope->lookup(array->ident);
+    if (!symbol) {
+        std::cerr << "错误：数组 " << array->ident << " 未声明" << std::endl;
+        return nullptr;
+    }
+
+    llvm::AllocaInst* arrayPtr = symbol->addr;
+    if (!arrayPtr) {
+        std::cerr << "错误：数组 " << array->ident << " 未分配空间" << std::endl;
+        return nullptr;
+    }
+
+    std::vector<llvm::Value*> indices;
+    indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+    for (int i : subscript) {
+        indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i));
+    }
+
+    llvm::Type* baseArrayType = llvm::Type::getInt32Ty(context);
+    for (auto it = symbol->dimensions.rbegin(); it != symbol->dimensions.rend(); it++) {
+        baseArrayType = llvm::ArrayType::get(baseArrayType, *it);
+    }
+
+    llvm::Value* gep = builder.CreateGEP(
+        baseArrayType,
+        arrayPtr,
+        indices,
+        "array_elem"
+    );
+
+    return gep;
 }
 
 // 标识符节点
