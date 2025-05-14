@@ -1,0 +1,10 @@
+program test {
+    main {
+        let a;
+        let b: [3,4,5];
+        input(a);
+        output(b[1,2,3]);
+        output(a);
+        output(5*6+3, 3*(4+6*(8-5)));
+    }
+}

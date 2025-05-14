@@ -6,6 +6,8 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Type.h>
 
 struct TypeInfo;
 struct Func;
@@ -25,6 +27,7 @@ struct SymbolInfo
     std::vector<int> dimensions;        // 展平后的数组维度信息
     std::vector<TypeInfo> paramTypes;   // 函数参数类型信息
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
+    llvm::AllocaInst* addr = nullptr;   // LLVM变量栈地址
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

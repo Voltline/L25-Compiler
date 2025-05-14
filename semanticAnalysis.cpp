@@ -19,9 +19,6 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     SymbolInfo progInfo{ SymbolKind::Program, program.name->ident };
     declareSymbol(program.name->ident, progInfo);
 
-    // 存储合法函数以便后续语义分析
-    std::vector<Func*> validFuncs;
-
     // 第一步：构建函数的符号表
     for (auto& func : program.functions) {
         const std::string& funcName = func->name->ident;
@@ -34,15 +31,10 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
         SymbolInfo funcInfo{ funcName, *func };
         declareSymbol(funcName, funcInfo);
 
-        validFuncs.push_back(func.get()); // 只记录合法函数
-    }
-
-    // 第二步：分析合法函数体
-    for (auto* func : validFuncs) {
         analyzeFunc(*func);
     }
 
-    // 第三步：分析 main 函数体
+    // 第二步：分析 main 函数体
     enterScope();
     for (auto& stmt : program.main_body->stmts) {
         analyzeStmt(*stmt);

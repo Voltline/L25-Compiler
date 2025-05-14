@@ -24,8 +24,40 @@ void Program::print(int indent) const
 
 llvm::Value* Program::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    // 声明printf函数，用于后续的输出
+    if (!module.getFunction("printf")) {
+        llvm::FunctionType* printfType = llvm::FunctionType::get(
+            llvm::IntegerType::getInt32Ty(context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            true // 可变参数
+        );
+        llvm::Function::Create(printfType, llvm::Function::ExternalLinkage, "printf", module);
+    }
+
+    // 声明scanf函数，用于后续的输入
+    if (!module.getFunction("scanf")) {
+        llvm::FunctionType* scanfType = llvm::FunctionType::get(
+            llvm::IntegerType::getInt32Ty(context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            true // 可变参数
+        );
+        llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", module);
+    }
+
+    // main函数
+    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
+    llvm::Function* mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", module);
+
+    // 入口基本块
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", mainFunc);
+    builder.SetInsertPoint(entry);
+
+    // 生成main_body的IR
+    main_body->codeGen(builder, context, module);
+
+    // 添加默认返回
+    builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+    return mainFunc;
 }
 
 // 函数节点
@@ -66,8 +98,11 @@ void StmtList::print(int indent) const
 
 llvm::Value* StmtList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    llvm::Value* last = nullptr;
+    for (const auto& stmt: stmts) {
+        last = stmt->codeGen(builder, context, module);
+    }
+    return last;
 }
 
 // 声明语句节点
@@ -85,8 +120,71 @@ void DeclareStmt::print(int indent) const
 
 llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    llvm::Type* intType = llvm::Type::getInt32Ty(context);
+    llvm::AllocaInst* alloca = nullptr;
+
+    const std::string& ident_name = name->ident;
+    auto typeInfo = name->type;
+
+    if (typeInfo.kind == SymbolKind::Int) {
+        // 普通整形的分配
+        alloca = builder.CreateAlloca(intType, nullptr, ident_name);
+    } else if (typeInfo.kind == SymbolKind::Array) {
+        // 多维数组的分配
+        llvm::Type* arrayType = intType;
+        for (auto it{ typeInfo.dims.rbegin() }; it != typeInfo.dims.rend(); it++) {
+            arrayType = llvm::ArrayType::get(arrayType, *it);
+        }
+        alloca = builder.CreateAlloca(arrayType, nullptr, ident_name);
+
+        // 类型参数列表：i8* 和 i64
+        auto memsetFn = llvm::Intrinsic::getDeclaration(
+            &module,
+            llvm::Intrinsic::memset,
+            {
+                llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+                llvm::Type::getInt64Ty(context)
+            }
+        );
+
+        // 构造参数
+        llvm::Value* zeroVal = llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0);
+        llvm::Value* sizeVal = llvm::ConstantInt::get(
+            llvm::Type::getInt64Ty(context),
+            module.getDataLayout().getTypeAllocSize(arrayType)
+        );
+        llvm::Value* isVolatile = llvm::ConstantInt::getFalse(context);
+
+        // 调用 memset
+        builder.CreateCall(memsetFn, {
+            builder.CreateBitCast(alloca, llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0)),
+            zeroVal,
+            sizeVal,
+            isVolatile
+        });
+    }
+
+    if (!alloca) {
+        std::cerr << "错误：无法为变量分配空间：" << ident_name << std::endl;
+        return nullptr;
+    }
+
+    // 找到符号
+    SymbolInfo* symbolInfo = scope->lookupLocal(ident_name);
+    symbolInfo->addr = alloca;
+
+    // 存在赋值
+    if (expr) {
+        llvm::Value* initVal = expr->codeGen(builder, context, module);
+        if (initVal) {
+            // 普通变量直接存入
+            if (typeInfo.kind == SymbolKind::Int) {
+                builder.CreateStore(initVal, alloca);
+            }
+            // TODO: 数组初始化还没做呢（目前只是零初始化）
+        }
+    }
+    return alloca;
 }
 
 // 赋值语句节点
@@ -182,7 +280,37 @@ void InputStmt::print(int indent) const
 
 llvm::Value* InputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
+    llvm::Function* scanfFunc = module.getFunction("scanf");
+    if (!scanfFunc) {
+        llvm::FunctionType* scanfType = llvm::FunctionType::get(
+            llvm::IntegerType::getInt32Ty(context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            true
+        );
+        scanfFunc = llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", module);
+    }
+
+    llvm::Value* formatStr = builder.CreateGlobalStringPtr("%d");
+
+    for (const auto& ident: idents) {
+        assert(scope && "InputStmt::codeGen 中的 scope 为空");
+        SymbolInfo* symbol = scope->lookup(ident->ident);
+        if (!symbol) {
+            std::cerr << "错误：变量 " << ident->ident << " 未声明" << std::endl;
+            return nullptr;
+        }
+
+        if (symbol->kind == SymbolKind::Array) {
+            std::cerr << "错误：不支持直接输入数组，已跳过 " << ident->ident << std::endl;
+            continue;
+        }
+
+        if (!symbol->addr) {
+            std::cerr << "错误：变量 " << ident->ident << " 未分配空间" << std::endl;
+            return nullptr;
+        }
+        builder.CreateCall(scanfFunc, { formatStr, symbol->addr });
+    }
     return nullptr;
 }
 
@@ -203,7 +331,25 @@ void OutputStmt::print(int indent) const
 
 llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
+    llvm::Function* printfFunc = module.getFunction("printf");
+    if (!printfFunc) {
+        llvm::FunctionType* printfType = llvm::FunctionType::get(
+            llvm::IntegerType::getInt32Ty(context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            true
+        );
+        printfFunc = llvm::Function::Create(printfType, llvm::Function::ExternalLinkage, "printf", module);
+    }
+
+    // "%d\n"形式的字符串
+    llvm::Value* formatStr = builder.CreateGlobalStringPtr("%d\n");
+
+    for (const auto& expr: idents) {
+        llvm::Value* val = expr->codeGen(builder, context, module);
+        if (val) {
+            builder.CreateCall(printfFunc, { formatStr, val });
+        }
+    }
     return nullptr;
 }
 
@@ -275,25 +421,26 @@ void BinaryExpr::print(int indent) const
 
 llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    // TODO: 符号表未实现，暂不实现codeGen
-    std::cerr << "暂未实现BinaryExpr的codeGen" << std::endl;
-    return nullptr;
-    // llvm::Value* LHS = lhs->codeGen(builder, context, module);
-    // llvm::Value* RHS = rhs->codeGen(builder, context, module);
-    // if (!LHS || !RHS) return nullptr;
+    llvm::Value* LHS = lhs->codeGen(builder, context, module);
+    llvm::Value* RHS = rhs->codeGen(builder, context, module);
+    if (!LHS || !RHS) {
+        std::cerr << "错误：二元运算的子表达式生成失败" << std::endl;
+        return nullptr;
+    }
 
-    // switch (op) {
-    // case '+':
-    //     return builder.CreateAdd(LHS, RHS, "addtmp");
-    // case '-':
-    //     return builder.CreateSub(LHS, RHS, "addtmp");
-    // case '*':
-    //     return builder.CreateMul(LHS, RHS, "addtmp");
-    // case '/':
-    //     return builder.CreateSDiv(LHS, RHS, "addtmp");
-    // default:
-    //     return nullptr;
-    // }
+    switch (op) {
+    case '+':
+        return builder.CreateAdd(LHS, RHS, "addtmp");
+    case '-':
+        return builder.CreateSub(LHS, RHS, "subtmp");
+    case '*':
+        return builder.CreateMul(LHS, RHS, "multmp");
+    case '/':
+        return builder.CreateSDiv(LHS, RHS, "divtmp");
+    default:
+        std::cerr << "错误：不支持的二元运算符 " << op << std::endl;
+        return nullptr;
+    }
 }
 
 // 数组下标访问运算节点
@@ -312,8 +459,42 @@ void ArraySubscriptExpr::print(int indent) const
 
 llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    SymbolInfo* symbol = scope->lookup(array->ident);
+    if (!symbol) {
+        std::cerr << "错误：数组 " << array->ident << " 未声明" << std::endl;
+        return nullptr;
+    }
+
+    llvm::AllocaInst* arrayPtr = symbol->addr;
+    if (!arrayPtr) {
+        std::cerr << "错误：数组 " << array->ident << " 未分配空间" << std::endl;
+        return nullptr;
+    }
+
+    std::vector<llvm::Value*> indices;
+
+    indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+
+    for (int i: subscript) {
+        indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i));
+    }
+
+    llvm::Type* baseType = llvm::Type::getInt32Ty(context);
+
+    // 只构建未被索引的那部分维度
+    for (size_t i = symbol->dimensions.size(); i > 0; i--) {
+        baseType = llvm::ArrayType::get(baseType, symbol->dimensions[i - 1]);
+    }
+
+    llvm::Value* gep = builder.CreateGEP(
+        baseType,
+        arrayPtr,
+        indices,
+        "array_elem"
+    );
+
+    llvm::Type* valueType = llvm::Type::getInt32Ty(context);
+    return builder.CreateLoad(valueType, gep, "load_elem");
 }
 
 // 标识符节点
@@ -346,7 +527,20 @@ void IdentExpr::print(int indent) const
 
 llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    std::cerr << "暂未实现" << std::endl;
+    SymbolInfo* symbol = scope->lookup(ident);
+
+    if (!symbol) {
+        std::cerr << "错误：标识符 " << ident << " 未找到" << std::endl;
+        return nullptr;
+    }
+
+    // 如果为变量
+    if (symbol->kind == SymbolKind::Int) {
+        llvm::Type* valueType = llvm::Type::getInt32Ty(context);
+        return builder.CreateLoad(valueType, symbol->addr, ident);
+    }
+
+    std::cerr << "错误：不支持返回的标识符 " << ident << std::endl;
     return nullptr;
 }
 
