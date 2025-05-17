@@ -1,0 +1,18 @@
+program test4 {
+    func fibs(i) {
+        let res = 1;
+        if (i > 2) {
+            res = fibs(i - 1) + fibs(i - 2);
+        };
+        return res;
+    }
+    main {
+        let a;
+        input(a);
+        let i = 1;
+        while (i < a) {
+            output(fibs(i));
+            i = i + 1;
+        };
+    }
+}
