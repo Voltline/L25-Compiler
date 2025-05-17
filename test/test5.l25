@@ -1,0 +1,21 @@
+program test5 {
+    func fibs(n) {
+        let tmp:[3]; // 用于保存三个值
+        tmp[0] = 1;
+        tmp[1] = 1;
+        let i = 2;
+        while (i <= n) {
+            tmp[2] = tmp[0] + tmp[1];
+            tmp[0] = tmp[1];
+            tmp[1] = tmp[2];
+            i = i + 1;
+        };
+        return tmp[2];
+    }
+
+    main {
+        let n = 0;
+        input(n);
+        output(fibs(n));
+    }
+}
