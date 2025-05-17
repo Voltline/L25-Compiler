@@ -55,6 +55,8 @@ struct ASTNode
 
     // 当前节点对应的作用域树节点
     Scope* scope; 
+    int lineno;
+    int column;
 };
 
 // 程序节点

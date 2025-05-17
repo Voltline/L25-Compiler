@@ -1,4 +1,5 @@
 #include "include/semanticAnalysis.h"
+extern bool hasError;
 
 /* SemanticAnalyzer 方法定义 */
 // Public
@@ -24,10 +25,10 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
         const std::string& funcName = func->name->ident;
 
         if (checkSameScopeSymbolExists(funcName)) {
-            std::cerr << "错误: 函数 " << funcName << " 重定义" << std::endl;
+            reportError(*func, "函数 " + funcName + " 重定义");
             continue;
         }
-
+        
         SymbolInfo funcInfo{ funcName, *func };
         declareSymbol(funcName, funcInfo);
 
@@ -60,7 +61,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
             const std::string& funcName = funcDefStmt->name->ident;
 
             if (checkSameScopeSymbolExists(funcName)) {
-                std::cerr << "错误: 函数 " << funcName << " 重定义" << std::endl;
+                reportError(*stmt, "函数 " + funcName + " 重定义");
                 continue;
             }
 
@@ -78,7 +79,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
     stmt.scope = currentScope;
     if (auto decl = dynamic_cast<const DeclareStmt*>(&stmt)) {
         if (checkSameScopeSymbolExists(decl->name->ident)) {
-            std::cerr << decl->name->ident << " 已存在，出现重定义行为" << std::endl;
+            reportError(*decl, "变量重定义：" + decl->name->ident);
         } else {
             SymbolInfo info{ decl->name->ident, decl->name->type };
             declareSymbol(decl->name->ident, info);
@@ -89,13 +90,13 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
     } else if (auto assign = dynamic_cast<const AssignStmt*>(&stmt)) {
         if (auto normalVarAssign = dynamic_cast<const IdentExpr*>(assign->name.get())) {
             if (!checkSymbolExists(normalVarAssign->ident)) {
-                std::cerr << normalVarAssign->ident << " 未声明" << std::endl;
+                reportError(*normalVarAssign, "变量未声明：" + normalVarAssign->ident);
                 return;
             }
             analyzeExpr(*assign->expr);
         } else if (auto arrayAssign = dynamic_cast<ArraySubscriptExpr*>(assign->name.get())) {
             if (!checkSymbolExists(arrayAssign->array->ident)) {
-                std::cerr << arrayAssign->array->ident << " 未声明" << std::endl;
+                reportError(*arrayAssign, "变量未声明：" + normalVarAssign->ident);
                 return;
             }
             analyzeExpr(*arrayAssign);
@@ -125,7 +126,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         }
     } else if (auto funcCallStmt = dynamic_cast<const FuncCallStmt*>(&stmt)) {
         if (!checkSymbolExists(funcCallStmt->name->ident)) {
-            std::cerr << funcCallStmt->name->ident << " 函数未定义" << std::endl;
+            reportError(*funcCallStmt, "函数未声明：" + funcCallStmt->name->ident);
             return;
         }
         if (funcCallStmt->args) {
@@ -136,7 +137,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
     } else if (auto inputStmt = dynamic_cast<const InputStmt*>(&stmt)) {
         for (const auto& ident: inputStmt->idents) {
             if (!checkSymbolExists(ident->ident)) {
-                std::cerr << ident->ident << " 未声明" << std::endl;
+                reportError(*ident, "变量未声明：" + ident->ident);
             }
         }
     } else if (auto outputStmt = dynamic_cast<const OutputStmt*>(&stmt)) {
@@ -154,11 +155,11 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
     if (auto ident = dynamic_cast<const IdentExpr*>(&expr)) {
         // 最小操作单位ident，绑定或不绑定scope没有区别
         if (ident->ident.empty()) {
-            std::cerr << "警告: IdentExpr 中的 ident 字符串为空！" << std::endl;
+            reportError(*ident, "变量名为空");
         }
 
         if (!checkSymbolExists(ident->ident)) {
-            std::cerr << ident->ident << " 不存在" << std::endl;
+            reportError(*ident, "变量未声明：" + ident->ident);
         }
     } else if (auto binary = dynamic_cast<const BinaryExpr*>(&expr)) {
         analyzeExpr(*binary->lhs);
@@ -167,26 +168,21 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         analyzeExpr(*unary->rhs);
     } else if (auto funcCallExpr = dynamic_cast<const FuncCallExpr*>(&expr)) {
         if (!checkSymbolExists(funcCallExpr->name->ident)) {
-            std::cerr << funcCallExpr->name->ident << " 函数未定义" << std::endl;
+            reportError(*funcCallExpr, "函数未声明：" + funcCallExpr->name->ident);
             return;
         }
         // 函数符号
         SymbolInfo* funcSymbol{ currentScope->lookup(funcCallExpr->name->ident) };
         if (!funcCallExpr->args) {
             if (!funcSymbol->paramTypes.empty()) {
-                std::cerr << funcCallExpr->name->ident << " 调用需要" 
-                    << funcSymbol->paramTypes.size() << "个参数，但调用时未传入参数" 
-                    << std::endl;
+                reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，但调用时未传入参数" );
                 return;
             }
         }
 
         if (funcCallExpr->args) {
             if (funcCallExpr->args->args.size() != funcSymbol->paramTypes.size()) {
-                std::cerr << funcCallExpr->name->ident << " 调用需要"
-                    << funcSymbol->paramTypes.size() << "个参数，但调用时传入"
-                    << funcCallExpr->args->args.size() << "个参数"
-                    << std::endl;
+                reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，，但调用时传入" + std::to_string(funcCallExpr->args->args.size()) + "个参数");
                     return;
             }
             // TODO: 加上参数对应类型检查，这里还有数组传入的问题
@@ -195,18 +191,26 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             }
         }
     } else if (auto subscript = dynamic_cast<const ArraySubscriptExpr*>(&expr)) {
+        if (!subscript->array) {
+            reportError(expr, "数组访问表达式非法，缺失数组对象");
+            return;
+        }
         analyzeExpr(*subscript->array);
         // 数组符号
         SymbolInfo* arraySymbol{ currentScope->lookup(subscript->array->ident) };
+        if (!arraySymbol) {
+            reportError(expr, "数组未声明：" + subscript->array->ident);
+            return;
+        }
         if (arraySymbol->kind != SymbolKind::Array) {
-            std::cerr << "尝试访问非数组变量" << arraySymbol->name << "的下标" << std::endl;
+            reportError(*subscript, "尝试访问非数组变量的下标：" + arraySymbol->name);
             return;
         }
         for (auto& idxExpr: subscript->subscript) {
             analyzeExpr(*idxExpr);
         }
         if (arraySymbol->dimensions.size() != subscript->subscript.size()) {
-            std::cerr << subscript->array->ident << "下标访问与数组维度不匹配" << std::endl;
+            reportError(*subscript, "下标访问与数组维度不匹配：" + subscript->array->ident);
             return;
         }
     }
@@ -259,4 +263,14 @@ void SemanticAnalyzer::exitScope()
         return;
     }
     currentScope = currentScope->getParent();
+}
+
+void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg) 
+{
+    std::cerr 
+      << "\033[1;31m[语法错误]\033[0m "
+      << "位于 \033[1;33m第 " << node.lineno 
+      << " 行, 第 " << node.column << " 列\033[0m: "
+      << msg << std::endl;
+      hasError = true;
 }

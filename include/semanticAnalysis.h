@@ -26,4 +26,5 @@ private:
 
     Scope* enterScope();
     void exitScope();
+    void reportError(const ASTNode& node, const std::string& msg);
 };

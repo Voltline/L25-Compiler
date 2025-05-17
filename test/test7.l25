@@ -1,0 +1,12 @@
+program test7 {
+    func f(n) {
+        let m = n + 1;
+        return m;
+    }
+
+    main {
+        let n = 0;
+        input(n);
+        output(f(n));
+    }
+}

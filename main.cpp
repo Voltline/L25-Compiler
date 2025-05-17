@@ -9,6 +9,7 @@
 
 extern int yyparse();
 Program* rootProgram = nullptr;
+bool hasError = false;
 
 int main(int argc, const char* argv[]) 
 {
@@ -16,8 +17,8 @@ int main(int argc, const char* argv[])
     // 解析输入的表达式
     yyparse();
 
-    if (!rootProgram) {
-        std::cerr << "No expression parsed.\n";
+    if (!rootProgram || hasError) {
+        std::cerr << "语法解析失败，停止" << std::endl;
         return 1;
     }
 
@@ -26,9 +27,13 @@ int main(int argc, const char* argv[])
     SemanticAnalyzer analyzer;
     analyzer.analyze(*rootProgram);
 
-    std::cout << "语义检查完成" << std::endl;
+    if (hasError) {
+        std::cerr << "语义检查出错，停止" << std::endl;
+        return 1;
+    } else {
+        std::cout << "语义检查完成" << std::endl;
+    }
 
-    std::cout << "rootProgram->scope" << rootProgram->scope << std::endl;
     rootProgram->scope->print();
 
     llvm::LLVMContext context;
@@ -37,8 +42,8 @@ int main(int argc, const char* argv[])
 
     // 生成表达式并将其值打印出来
     llvm::Value* val = rootProgram->codeGen(builder, context, module);
-    if (!val) {
-        std::cerr << "Code generation failed.\n";
+    if (!val || hasError) {
+        std::cerr << "LLVM IR生成失败，停止" << std::endl;
         return 1;
     }
 

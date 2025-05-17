@@ -1,3 +1,5 @@
+%locations
+%define parse.error verbose
 %{
 #include "include/ast.h"
 #include "include/symbol.h"
@@ -5,11 +7,24 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+extern int yydebug;
+extern int yylineno;
+extern int yycolumn;
+extern int yyleng;
+extern char* yytext;
+extern bool hasError;
 
 int yylex();
-void yyerror(const char* msg) { fprintf(stderr, "Error: %s\n", msg); }
+void yyerror(const char* s) 
+{
+    fprintf(stderr,
+        "\033[1;31m[语法错误]\033[0m "
+        "位于 \033[1;33m第 %d 行, 第 %d 列\033[0m: %s "
+        "(near \033[1;34m'%s'\033[0m)\n",
+        yylineno, yycolumn, s, yytext);
+    hasError = true;
+}
 extern Program* rootProgram;
-extern int yydebug;
 %}
 
 %union {
@@ -83,11 +98,15 @@ input:
     {
         $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($6));
         rootProgram = $$;
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | PROGRAM IDENT LBRACE func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
         $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::unique_ptr<StmtList>($7));
         rootProgram = $$;
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -108,10 +127,14 @@ func:
     FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
     {
         $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
     {
         $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -119,10 +142,14 @@ nested_func_stmt:
     FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
     {
         $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
     {
         $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -202,6 +229,8 @@ declare_stmt:
             std::make_unique<IdentExpr>(*$2, TypeInfo{ SymbolKind::Int, {} }), 
             nullptr
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | LET IDENT ASSIGN expr
     {
@@ -209,6 +238,8 @@ declare_stmt:
             std::make_unique<IdentExpr>(*$2, TypeInfo{ SymbolKind::Int, {} }), 
             std::unique_ptr<Expr>($4)        
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | LET IDENT COLON type_info
     {
@@ -216,6 +247,8 @@ declare_stmt:
             std::make_unique<IdentExpr>(*$2, *$4),
             nullptr
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | LET IDENT COLON type_info ASSIGN expr
     {
@@ -223,6 +256,8 @@ declare_stmt:
             std::make_unique<IdentExpr>(*$2, *$4),
             std::unique_ptr<Expr>($6)
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -233,14 +268,17 @@ assign_stmt:
             std::make_unique<IdentExpr>(*$1),
             std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | array_subscript_expr ASSIGN expr
     {
-        
         $$ = new AssignStmt{
             std::make_unique<ArraySubscriptExpr>(std::move(static_cast<ArraySubscriptExpr*>($1)->array), std::move(static_cast<ArraySubscriptExpr*>($1)->subscript)),
             std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     ;
 
@@ -250,12 +288,16 @@ if_stmt:
         $$ = new IfStmt{
             std::unique_ptr<BoolExpr>($3), std::unique_ptr<StmtList>($6), nullptr
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | IF LPAREN bool_expr RPAREN LBRACE stmt_list RBRACE ELSE LBRACE stmt_list RBRACE
     {
         $$ = new IfStmt{
             std::unique_ptr<BoolExpr>($3), std::unique_ptr<StmtList>($6), std::unique_ptr<StmtList>($10)
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -265,6 +307,8 @@ while_stmt:
         $$ = new WhileStmt{
             std::unique_ptr<BoolExpr>($3), std::unique_ptr<StmtList>($6)
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -274,12 +318,16 @@ func_call:
         $$ = new FuncCallStmt{
             std::unique_ptr<IdentExpr>(new IdentExpr(*$1)), nullptr
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | IDENT LPAREN arg_list RPAREN
     {
         $$ = new FuncCallStmt{
             std::unique_ptr<IdentExpr>(new IdentExpr(*$1)), std::unique_ptr<ArgList>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     ;
 
@@ -300,6 +348,8 @@ input_stmt:
     INPUT LPAREN input_arg_list RPAREN
     {
         $$ = new InputStmt{ std::unique_ptr<InputArgList>($3) };
+        $$->lineno = yylineno;
+        $$->column = yycolumn - yyleng;
     }
     ;
 
@@ -307,6 +357,8 @@ output_stmt:
     OUTPUT LPAREN arg_list RPAREN
     {
         $$ = new OutputStmt{ std::unique_ptr<ArgList>($3) };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     } 
     ;
 
@@ -316,36 +368,48 @@ bool_expr:
         $$ = new BoolExpr{
             "==", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | expr NEQ expr
     {
         $$ = new BoolExpr{
             "!=", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | expr LT expr
     {
         $$ = new BoolExpr{
             "<", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | expr LE expr
     {
         $$ = new BoolExpr{
             "<=", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | expr GT expr
     {
         $$ = new BoolExpr{
             ">", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | expr GE expr
     {
         $$ = new BoolExpr{
             ">=", std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     ;
 
@@ -355,24 +419,32 @@ expr:
         $$ = new UnaryExpr{
           '+', std::unique_ptr<Expr>($2)
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | MINUS term %prec UMINUS
     {
         $$ = new UnaryExpr{
           '-', std::unique_ptr<Expr>($2)
         };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | expr PLUS term
     {
         $$ = new BinaryExpr{
             '+', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | expr MINUS term
     {
         $$ = new BinaryExpr{
             '-', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | term
     {
@@ -386,12 +458,16 @@ term:
         $$ = new BinaryExpr{
             '*', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | term DIVIDE factor
     {
         $$ = new BinaryExpr{
             '/', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
     }
     | factor
     {
@@ -403,11 +479,15 @@ factor:
     NUMBER
     {
         $$ = new NumberExpr($1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | IDENT
     {
         $$ = new IdentExpr(*$1);
         delete $1;
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | LPAREN expr RPAREN
     {
@@ -416,6 +496,8 @@ factor:
     | func_call
     {
         $$ = new FuncCallExpr{std::unique_ptr<FuncCallStmt>($1)};
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | array_subscript_expr
     {
@@ -432,6 +514,8 @@ array_subscript_expr:
         };
         delete $1;
         delete $3;
+        $$->lineno = @3.first_line;
+        $$->column = @3.first_column;
     }
     ;
 

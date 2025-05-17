@@ -1,5 +1,6 @@
 #include "include/ast.h"
 #include <llvm/IR/Type.h>
+extern bool hasError;
 
 // TypeInfo 方法
 TypeInfo::TypeInfo()
@@ -91,6 +92,7 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
     SymbolInfo* funcSymbol = scope->lookup(funcName);
     if (!funcSymbol) {
         std::cerr << "错误：函数符号 " << funcName << " 不存在" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -237,6 +239,7 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
 
     if (!alloca) {
         std::cerr << "错误：无法为变量分配空间：" << ident_name << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -274,6 +277,7 @@ llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
     llvm::Value* rhs = expr->codeGen(builder, context, module);
     if (!rhs) {
         std::cerr << "错误：赋值右侧表达式生成失败" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -284,6 +288,7 @@ llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
         SymbolInfo* symbol = scope->lookup(identExpr->ident);
         if (!symbol || !symbol->addr) {
             std::cerr << "错误：变量未声明或未分配空间：" << identExpr->ident << std::endl;
+            hasError = true;
             return nullptr;
         }
         lhsAddr = symbol->addr;
@@ -291,10 +296,12 @@ llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
         lhsAddr = arrayExpr->getAddress(builder, context, module);
         if (!lhsAddr) {
             std::cerr << "错误：获取数组元素地址失败" << std::endl;
+            hasError = true;
             return nullptr;
         }
     } else {
         std::cerr << "错误：左值类型错误" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -328,6 +335,7 @@ llvm::Value* IfStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& cont
     llvm::Value* condValue = condition->codeGen(builder, context, module);
     if (!condValue) {
         std::cerr << "错误：if条件表达式生成失败" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -438,6 +446,7 @@ llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
     llvm::Function* calleeFunc = module.getFunction(funcName);
     if (!calleeFunc) {
         std::cerr << "错误：函数未定义：" << funcName << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -489,16 +498,19 @@ llvm::Value* InputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
         SymbolInfo* symbol = scope->lookup(ident->ident);
         if (!symbol) {
             std::cerr << "错误：变量 " << ident->ident << " 未声明" << std::endl;
+            hasError = true;
             return nullptr;
         }
 
         if (symbol->kind == SymbolKind::Array) {
             std::cerr << "错误：不支持直接输入数组，已跳过 " << ident->ident << std::endl;
+            hasError = true;
             continue;
         }
 
         if (!symbol->addr) {
             std::cerr << "错误：变量 " << ident->ident << " 未分配空间" << std::endl;
+            hasError = true;
             return nullptr;
         }
         builder.CreateCall(scanfFunc, { formatStr, symbol->addr });
@@ -583,6 +595,7 @@ llvm::Value* BoolExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& co
 
     if (!lhsVal || !rhsVal) {
         std::cerr << "错误：布尔表达式左右子表达式生成失败" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -601,10 +614,12 @@ llvm::Value* BoolExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& co
             return builder.CreateICmpSGE(lhsVal, rhsVal, "cmpge");
         } else {
             std::cerr << "错误：不支持的布尔操作符 " << symbol << std::endl;
+            hasError = true;
             return nullptr;
         }
     } else {
         std::cerr << "错误：暂不支持非整数类型的布尔比较" << std::endl;
+        hasError = true;
         return nullptr;
     }
 }
@@ -640,7 +655,6 @@ llvm::Value* UnaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
     case '-':
         return builder.CreateNeg(RHS);
     default:
-        std::cerr << "暂未实现" << std::endl;
         return nullptr;
     }
 }
@@ -662,6 +676,7 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
     llvm::Value* RHS = rhs->codeGen(builder, context, module);
     if (!LHS || !RHS) {
         std::cerr << "错误：二元运算的子表达式生成失败" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -676,6 +691,7 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
         return builder.CreateSDiv(LHS, RHS, "divtmp");
     default:
         std::cerr << "错误：不支持的二元运算符 " << op << std::endl;
+        hasError = true;
         return nullptr;
     }
 }
@@ -697,6 +713,7 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
     SymbolInfo* symbol = scope->lookup(array->ident);
     if (!symbol) {
         std::cerr << "错误：数组 " << array->ident << " 未声明" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -719,6 +736,7 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
 
     if (!arrayPtr) {
         std::cerr << "错误：数组 " << array->ident << " 未分配空间" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -734,6 +752,7 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
 
     if (indices.size() - 1 != symbol->dimensions.size()) {
         std::cerr << "错误：数组维度不匹配，无法访问：" << indices.size() - 1 << " != " << symbol->dimensions.size() << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -751,6 +770,7 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
     SymbolInfo* symbol = scope->lookup(array->ident);
     if (!symbol) {
         std::cerr << "错误：数组 " << array->ident << " 未声明" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -771,6 +791,7 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
 
     if (!arrayPtr) {
         std::cerr << "错误：数组 " << array->ident << " 未分配空间" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -781,6 +802,7 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
         llvm::Value* idxVal = expr->codeGen(builder, context, module);
         if (!idxVal) {
             std::cerr << "错误：存在无法作为下标的符号" << std::endl;
+            hasError = true;
             return nullptr;  // 错误处理
         }
         indices.push_back(idxVal);
@@ -830,6 +852,7 @@ llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
 
     if (!symbol) {
         std::cerr << "错误：标识符 " << ident << " 未找到" << std::endl;
+        hasError = true;
         return nullptr;
     }
 
@@ -842,6 +865,7 @@ llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
     }
 
     std::cerr << "错误：不支持返回的标识符 " << ident << std::endl;
+    hasError = true;
     return nullptr;
 }
 
@@ -868,6 +892,7 @@ llvm::Value* FuncCallExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
     llvm::Function* calleeFunc = module.getFunction(funcName);
     if (!calleeFunc) {
         std::cerr << "错误：函数未定义：" << funcName << std::endl;
+        hasError = true;
         return nullptr;
     }
 
