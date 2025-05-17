@@ -140,7 +140,7 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
     }
 
     for (const auto& stmt: stmts->stmts) {
-        if (const auto* funcDef = dynamic_cast<const Func*>(stmt.get())) {
+        if (dynamic_cast<const Func*>(stmt.get())) {
             llvm::BasicBlock* beforeNested = builder.GetInsertBlock();
             stmt->codeGen(builder, context, module);
             builder.SetInsertPoint(beforeNested);
@@ -209,7 +209,7 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
         alloca = builder.CreateAlloca(arrayType, nullptr, ident_name);
 
         // 类型参数列表：i8* 和 i64
-        auto memsetFn = llvm::Intrinsic::getDeclaration(
+        auto memsetFn = llvm::Intrinsic::getOrInsertDeclaration(
             &module,
             llvm::Intrinsic::memset,
             {
@@ -482,7 +482,7 @@ llvm::Value* InputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
         scanfFunc = llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", module);
     }
 
-    llvm::Value* formatStr = builder.CreateGlobalStringPtr("%d");
+    llvm::Value* formatStr = builder.CreateGlobalString("%d");
 
     for (const auto& ident: idents) {
         assert(scope && "InputStmt::codeGen 中的 scope 为空");
@@ -521,28 +521,45 @@ void OutputStmt::print(int indent) const
     }
 }
 
-llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
-{
+llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
+    // 获取或声明 printf 函数
     llvm::Function* printfFunc = module.getFunction("printf");
     if (!printfFunc) {
         llvm::FunctionType* printfType = llvm::FunctionType::get(
             llvm::IntegerType::getInt32Ty(context),
             llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
-            true
+            true // 可变参数
         );
-        printfFunc = llvm::Function::Create(printfType, llvm::Function::ExternalLinkage, "printf", module);
+        printfFunc = llvm::Function::Create(
+            printfType,
+            llvm::Function::ExternalLinkage,
+            "printf",
+            module
+        );
     }
 
+    // 构建格式字符串和参数列表
+    std::string formatStr;
+    std::vector<llvm::Value*> printfArgs;
 
-    // "%d\n"形式的字符串
-    llvm::Value* formatStr = builder.CreateGlobalStringPtr("%d\n");
-
-    for (const auto& expr: idents) {
+    for (const auto& expr : idents) {
         llvm::Value* val = expr->codeGen(builder, context, module);
         if (val) {
-            builder.CreateCall(printfFunc, { formatStr, val });
+            if (!formatStr.empty()) {
+                formatStr += " "; // 多个数之间空格分隔
+            }
+            formatStr += "%d";
+            printfArgs.push_back(val);
         }
     }
+
+    if (!formatStr.empty()) {
+        formatStr += "\n"; // 行末换行
+        llvm::Value* formatStrVal = builder.CreateGlobalString(formatStr);
+        printfArgs.insert(printfArgs.begin(), formatStrVal); // 格式串是第一个参数
+        builder.CreateCall(printfFunc, printfArgs);
+    }
+
     return nullptr;
 }
 
@@ -695,7 +712,7 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
 
     if (symbol->isFuncParam) {
         // 函数参数情况，形如：alloca ptr -> store ptr to array
-        arrayPtr = builder.CreateLoad(elementType->getPointerTo(), arrayAlloca, array->ident + "_loaded");
+        arrayPtr = builder.CreateLoad(llvm::PointerType::get(elementType, 0), arrayAlloca, array->ident + "_loaded");
     } else {
         // 本地变量（alloca 的就是数组）
         arrayPtr = arrayAlloca;
@@ -740,7 +757,7 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
     }
 
     if (symbol->isFuncParam) {
-        arrayPtr = builder.CreateLoad(elementType->getPointerTo(), arrayAlloca, array->ident + "_loaded");
+        arrayPtr = builder.CreateLoad(llvm::PointerType::get(elementType, 0), arrayAlloca, array->ident + "_loaded");
     } else {
         arrayPtr = arrayAlloca;
     }

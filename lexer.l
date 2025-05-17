@@ -1,3 +1,4 @@
+%option noyymore noinput nounput
 %{
 #include "include/ast.h"
 #include "parser.tab.hpp"

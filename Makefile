@@ -11,8 +11,7 @@ BISON = /opt/homebrew/Cellar/bison/3.8.2/bin/bison
 
 CXXFLAGS += -std=c++17 \
 			-Wall \
-			-I/opt/homebrew/Cellar/flex/2.6.4_2/include \
-			-g -O0
+			-I/opt/homebrew/Cellar/flex/2.6.4_2/include
 LLVMFLAGS = -L$(LLVM_LIB) -lLLVM
 
 all: compiler.out
