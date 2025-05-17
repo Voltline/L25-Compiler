@@ -4,13 +4,14 @@ program test {
         let b: [3,4,5];
         input(a);
         b[1,2,3] = 1;
-        if (a > 3) {
-            a = 12345;
-        } else {
-            a = 23333;
+        while (a < 100) {
+            while (a < 50) {
+                a = a + 10;
+            };
+            a = a + 1;
+            output(a);
         };
         output(b[1,2,3]);
-        output(a);
         output(5*6+3, 3*(4+6*(8-5)));
     }
 }

@@ -310,10 +310,41 @@ void WhileStmt::print(int indent) const
     loop_body->print(indent + 2);
 }
 
-llvm::Value* WhileStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* WhileStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    llvm::Function* function = builder.GetInsertBlock()->getParent();
+
+    llvm::BasicBlock* condBlock = llvm::BasicBlock::Create(context, "while.cond", function);
+    llvm::BasicBlock* bodyBlock = llvm::BasicBlock::Create(context, "while.body", function);
+    llvm::BasicBlock* afterBlock = llvm::BasicBlock::Create(context, "while.after", function);
+
+    // 跳转到条件判断
+    builder.CreateBr(condBlock);
+
+    // 条件判断块
+    builder.SetInsertPoint(condBlock);
+    llvm::Value* condValue = condition->codeGen(builder, context, module);
+    if (!condValue) return nullptr;
+
+    if (!condValue->getType()->isIntegerTy(1)) {
+        condValue = builder.CreateICmpNE(condValue, llvm::ConstantInt::get(condValue->getType(), 0), "whilecond");
+    }
+
+    builder.CreateCondBr(condValue, bodyBlock, afterBlock);
+
+    // 循环体块
+    builder.SetInsertPoint(bodyBlock);
+    loop_body->codeGen(builder, context, module);
+
+    // 如果body里没有终结指令，就跳回条件块
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        builder.CreateBr(condBlock);
+    }
+
+    // while结束块
+    builder.SetInsertPoint(afterBlock);
+
+    return afterBlock;
 }
 
 // 函数调用语句节点
@@ -412,6 +443,7 @@ llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
         );
         printfFunc = llvm::Function::Create(printfType, llvm::Function::ExternalLinkage, "printf", module);
     }
+
 
     // "%d\n"形式的字符串
     llvm::Value* formatStr = builder.CreateGlobalStringPtr("%d\n");
@@ -713,7 +745,6 @@ void ArgList::print(int indent) const
 
 llvm::Value* ArgList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    std::cerr << "暂未实现" << std::endl;
     return nullptr;
 }
 
@@ -731,7 +762,6 @@ void ParamList::print(int indent) const
 
 llvm::Value* ParamList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
 {
-    std::cerr << "暂未实现" << std::endl;
     return nullptr;
 }
 
@@ -749,6 +779,5 @@ void InputArgList::print(int indent) const
 
 llvm::Value* InputArgList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
 {
-    std::cerr << "暂未实现" << std::endl;
     return nullptr;
 }
