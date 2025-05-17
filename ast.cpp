@@ -681,17 +681,16 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
 }
 
 // 数组下标访问运算节点
-ArraySubscriptExpr::ArraySubscriptExpr(std::unique_ptr<IdentExpr> array, std::vector<int> subscript)
+ArraySubscriptExpr::ArraySubscriptExpr(std::unique_ptr<IdentExpr> array, std::vector<std::unique_ptr<Expr>> subscript)
     : array(std::move(array)), subscript(std::move(subscript)) {}
 
 void ArraySubscriptExpr::print(int indent) const
 {
-    std::cout << std::string(indent, ' ') << "Array Subscript(" << array->ident << "[";
+    std::cout << std::string(indent, ' ') << "Array Subscript(" << array->ident << "[" << std::endl;
     for (int i = 0; i < subscript.size(); i++) {
-        if (i != 0) std::cout << ",";
-        std::cout << subscript[i];
+        subscript[i]->print(indent + 2);
     }
-    std::cout << "])" << std::endl;
+    std::cout << std::string(indent, ' ') << "])" << std::endl;
 }
 
 llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
@@ -726,8 +725,16 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
     // 计算下标
     std::vector<llvm::Value*> indices;
     indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
-    for (int i : subscript) {
-        indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i));
+    for (auto& expr: subscript) {
+        llvm::Value* index = expr->codeGen(builder, context, module);
+        if (index) {
+            indices.push_back(index);
+        }
+    }
+
+    if (indices.size() - 1 != symbol->dimensions.size()) {
+        std::cerr << "错误：数组维度不匹配，无法访问：" << indices.size() - 1 << " != " << symbol->dimensions.size() << std::endl;
+        return nullptr;
     }
 
     llvm::Value* gep = builder.CreateGEP(
@@ -770,8 +777,13 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
     // 构造 GEP 索引
     std::vector<llvm::Value*> indices;
     indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
-    for (int i : subscript) {
-        indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i));
+    for (const auto& expr : subscript) {
+        llvm::Value* idxVal = expr->codeGen(builder, context, module);
+        if (!idxVal) {
+            std::cerr << "错误：存在无法作为下标的符号" << std::endl;
+            return nullptr;  // 错误处理
+        }
+        indices.push_back(idxVal);
     }
 
     llvm::Value* gep = builder.CreateGEP(

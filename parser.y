@@ -29,6 +29,7 @@ extern int yydebug;
     std::vector<int>* dims; // 数组维度信息
     TypeInfo* typeInfo;  // 类型信息
     Func* nestedFuncStmt; // 嵌套函数定义语句
+    std::vector<std::unique_ptr<Expr>>* arraySubscriptList; // 数组访问专用下标列表
 }
 
 %debug
@@ -56,6 +57,7 @@ extern int yydebug;
 %type <expr> term
 %type <expr> factor
 %type <expr> array_subscript_expr
+%type <arraySubscriptList> array_subscript_list
 
 %type <boolExpr> bool_expr
 
@@ -422,16 +424,28 @@ factor:
     ;
 
 array_subscript_expr:
-    IDENT LBRACKET dim_list RBRACKET
+    IDENT LBRACKET array_subscript_list RBRACKET
     {
         $$ = new ArraySubscriptExpr{
-            std::make_unique<IdentExpr>(*$1, TypeInfo{ SymbolKind::Array, *$3 }),
-            *$3
+            std::make_unique<IdentExpr>(*$1, TypeInfo{ SymbolKind::Array, std::vector<int>() }),
+            std::move(*$3)
         };
         delete $1;
         delete $3;
     }
     ;
+
+array_subscript_list:
+    expr
+    {
+        $$ = new std::vector<std::unique_ptr<Expr>>();
+        $$->push_back(std::unique_ptr<Expr>($1));
+    }
+    | array_subscript_list COMMA expr
+    {
+        $$ = $1;
+        $$->push_back(std::unique_ptr<Expr>($3));
+    }
 
 dim_list:
     NUMBER

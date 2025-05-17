@@ -1,11 +1,15 @@
 program test6 {
     main {
         let a:[3, 3];
-        a[0, 0] = 1;
-        a[1, 1] = 2;
-        a[2, 2] = 3;
-        output(a[0, 0], a[0, 1], a[0, 2]);
-        output(a[1, 0], a[1, 1], a[1, 2]);
-        output(a[2, 0], a[2, 1], a[2, 2]);
+        let i = 0;
+        while (i < 3) {
+            a[i, i] = i * 123;
+            i = i + 1;
+        };
+        let idx = 0;
+        while (idx < 3) {
+            output(a[idx, 0], a[idx, 1], a[idx, 2]);
+            idx  = idx + 1;
+        };
     }
 }

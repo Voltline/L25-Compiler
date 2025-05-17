@@ -249,8 +249,8 @@ struct BinaryExpr: public Expr
 struct ArraySubscriptExpr: public Expr
 {
     std::unique_ptr<IdentExpr> array;
-    std::vector<int> subscript;
-    ArraySubscriptExpr(std::unique_ptr<IdentExpr> array, std::vector<int> subscript);
+    std::vector<std::unique_ptr<Expr>> subscript;
+    ArraySubscriptExpr(std::unique_ptr<IdentExpr> array, std::vector<std::unique_ptr<Expr>> subscript);
 
     void print(int indent = 0) const override;
 

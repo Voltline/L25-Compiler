@@ -202,14 +202,10 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             std::cerr << "尝试访问非数组变量" << arraySymbol->name << "的下标" << std::endl;
             return;
         }
-        if (arraySymbol->dimensions.size() == subscript->subscript.size()) {
-            for (int i = 0; i < subscript->subscript.size(); i++) {
-                if (!(arraySymbol->dimensions[i] > subscript->subscript[i])) {
-                    std::cerr << subscript->array->ident << "下标访问越界" << std::endl;
-                    return;
-                }
-            }
-        } else {
+        for (auto& idxExpr: subscript->subscript) {
+            analyzeExpr(*idxExpr);
+        }
+        if (arraySymbol->dimensions.size() != subscript->subscript.size()) {
             std::cerr << subscript->array->ident << "下标访问与数组维度不匹配" << std::endl;
             return;
         }
