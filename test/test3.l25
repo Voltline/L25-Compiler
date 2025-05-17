@@ -1,17 +1,16 @@
 program test {
+    func tt(a, d:[3,4,5]) {
+        func aaa() {
+            let a = 1;
+            return 1;
+        };
+        d[1,2,3] = 31241;
+        return d[1,2,3] + aaa();
+    }
     main {
         let a;
         let b: [3,4,5];
-        input(a);
-        b[1,2,3] = 1;
-        while (a < 100) {
-            while (a < 50) {
-                a = a + 10;
-            };
-            a = a + 1;
-            output(a);
-        };
+        tt(1, b);
         output(b[1,2,3]);
-        output(5*6+3, 3*(4+6*(8-5)));
     }
 }

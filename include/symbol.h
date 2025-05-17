@@ -27,7 +27,8 @@ struct SymbolInfo
     std::vector<int> dimensions;        // 展平后的数组维度信息
     std::vector<TypeInfo> paramTypes;   // 函数参数类型信息
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
-    llvm::AllocaInst* addr = nullptr;   // LLVM变量栈地址
+    llvm::Value* addr = nullptr;        // LLVM变量栈地址
+    bool isFuncParam = false;           // 是否为函数参数(影响数组访问)
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

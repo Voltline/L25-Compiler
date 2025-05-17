@@ -81,6 +81,7 @@ struct Func: public Stmt
     std::unique_ptr<ParamList> params; // Nullable
     std::unique_ptr<StmtList> stmts;
     std::unique_ptr<Expr> return_value;
+    Scope* body_scope;
 
     Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value);
 

@@ -1,4 +1,5 @@
 #include "include/ast.h"
+#include <llvm/IR/Type.h>
 
 // TypeInfo 方法
 TypeInfo::TypeInfo()
@@ -44,6 +45,11 @@ llvm::Value* Program::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& con
         llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", module);
     }
 
+    // 函数部分
+    for (auto& function: functions) {
+        function->codeGen(builder, context, module);
+    }
+
     // main函数
     llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
     llvm::Function* mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", module);
@@ -80,8 +86,73 @@ void Func::print(int indent) const
 
 llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    const std::string funcName= name->ident;
+
+    SymbolInfo* funcSymbol = scope->lookup(funcName);
+    if (!funcSymbol) {
+        std::cerr << "错误：函数符号 " << funcName << " 不存在" << std::endl;
+        return nullptr;
+    }
+
+    std::vector<llvm::Type*> argTypes;
+    for (const auto& typeInfo: funcSymbol->paramTypes) {
+        if (typeInfo.kind == SymbolKind::Array) {
+            // 数组退化成指针
+            llvm::Type* elementType = llvm::Type::getInt32Ty(context);
+            llvm::Type* arrayType = elementType;
+            for (int i = typeInfo.dims.size() - 1; i >= 0; i--) {
+                arrayType = llvm::ArrayType::get(arrayType, typeInfo.dims[i]);
+            }
+            argTypes.push_back(llvm::PointerType::get(arrayType, 0));
+        } else {
+            argTypes.push_back(llvm::Type::getInt32Ty(context));
+        }
+    }
+
+    llvm::FunctionType* funcType = llvm::FunctionType::get(
+        llvm::Type::getInt32Ty(context), argTypes, false
+    );
+
+    llvm::Function* function = llvm::Function::Create(
+        funcType, llvm::Function::ExternalLinkage, funcName, module
+    );
+
+    funcSymbol->value = function; // 更新函数指针
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", function);
+    builder.SetInsertPoint(entry);
+
+    int idx = 0;
+    for (auto& arg: function->args()) {
+        arg.setName(params->params[idx]->ident); // 设置形参名
+        SymbolInfo* argInfo = body_scope->lookupLocal(params->params[idx]->ident);
+        
+        if (argInfo->kind == SymbolKind::Array) {
+            // 数组：直接把传入的指针存储在 alloca 里
+            argInfo->addr = &arg;
+        } else {
+            llvm::AllocaInst* alloca = builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
+            builder.CreateStore(&arg, alloca);
+            argInfo->addr = alloca;
+        }
+        argInfo->value = &arg;
+        idx++;
+    }
+
+    for (const auto& stmt: stmts->stmts) {
+        if (const auto* funcDef = dynamic_cast<const Func*>(stmt.get())) {
+            llvm::BasicBlock* beforeNested = builder.GetInsertBlock();
+            stmt->codeGen(builder, context, module);
+            builder.SetInsertPoint(beforeNested);
+        } else {
+            stmt->codeGen(builder, context, module);
+        }
+    }
+
+    llvm::Value* retVal = return_value->codeGen(builder, context, module);
+    builder.CreateRet(retVal);
+
+    return function;
 }
 
 // 语句列表节点
@@ -362,8 +433,26 @@ void FuncCallStmt::print(int indent) const
 
 llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    const std::string& funcName = name->ident;
+
+    llvm::Function* calleeFunc = module.getFunction(funcName);
+    if (!calleeFunc) {
+        std::cerr << "错误：函数未定义：" << funcName << std::endl;
+        return nullptr;
+    }
+
+    std::vector<llvm::Value*> argsV;
+    if (args) {
+        for (const auto& argExpr: args->args) {
+            llvm::Value* argVal = argExpr->codeGen(builder, context, module);
+            if (!argVal) return nullptr;
+            argsV.push_back(argVal);
+        }
+    }
+
+    // 调用函数，不关心返回值
+    builder.CreateCall(calleeFunc, argsV);
+    return nullptr; // 作为语句，不返回值
 }
 
 // 输入语句节点
@@ -588,44 +677,50 @@ void ArraySubscriptExpr::print(int indent) const
     std::cout << "])" << std::endl;
 }
 
-llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
-{
+llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
     SymbolInfo* symbol = scope->lookup(array->ident);
     if (!symbol) {
         std::cerr << "错误：数组 " << array->ident << " 未声明" << std::endl;
         return nullptr;
     }
 
-    llvm::AllocaInst* arrayPtr = symbol->addr;
+    llvm::Value* arrayAlloca = symbol->addr;
+    llvm::Value* arrayPtr = nullptr;
+
+    // 构造数组的完整类型：[d1 x [d2 x ... [dn x i32]]]
+    llvm::Type* elementType = llvm::Type::getInt32Ty(context);
+    for (int i = symbol->dimensions.size() - 1; i >= 0; --i) {
+        elementType = llvm::ArrayType::get(elementType, symbol->dimensions[i]);
+    }
+
+    if (symbol->isFuncParam) {
+        // 函数参数情况，形如：alloca ptr -> store ptr to array
+        arrayPtr = builder.CreateLoad(elementType->getPointerTo(), arrayAlloca, array->ident + "_loaded");
+    } else {
+        // 本地变量（alloca 的就是数组）
+        arrayPtr = arrayAlloca;
+    }
+
     if (!arrayPtr) {
         std::cerr << "错误：数组 " << array->ident << " 未分配空间" << std::endl;
         return nullptr;
     }
 
+    // 计算下标
     std::vector<llvm::Value*> indices;
-
     indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
-
-    for (int i: subscript) {
+    for (int i : subscript) {
         indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i));
     }
 
-    llvm::Type* baseType = llvm::Type::getInt32Ty(context);
-
-    // 只构建未被索引的那部分维度
-    for (size_t i = symbol->dimensions.size(); i > 0; i--) {
-        baseType = llvm::ArrayType::get(baseType, symbol->dimensions[i - 1]);
-    }
-
     llvm::Value* gep = builder.CreateGEP(
-        baseType,
+        elementType,
         arrayPtr,
         indices,
         "array_elem"
     );
 
-    llvm::Type* valueType = llvm::Type::getInt32Ty(context);
-    return builder.CreateLoad(valueType, gep, "load_elem");
+    return builder.CreateLoad(llvm::Type::getInt32Ty(context), gep, "load_elem");
 }
 
 llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
@@ -635,25 +730,35 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
         return nullptr;
     }
 
-    llvm::AllocaInst* arrayPtr = symbol->addr;
+    llvm::Value* arrayAlloca = symbol->addr;
+    llvm::Value* arrayPtr = nullptr;
+
+    // 构造完整数组类型
+    llvm::Type* elementType = llvm::Type::getInt32Ty(context);
+    for (int i = symbol->dimensions.size() - 1; i >= 0; --i) {
+        elementType = llvm::ArrayType::get(elementType, symbol->dimensions[i]);
+    }
+
+    if (symbol->isFuncParam) {
+        arrayPtr = builder.CreateLoad(elementType->getPointerTo(), arrayAlloca, array->ident + "_loaded");
+    } else {
+        arrayPtr = arrayAlloca;
+    }
+
     if (!arrayPtr) {
         std::cerr << "错误：数组 " << array->ident << " 未分配空间" << std::endl;
         return nullptr;
     }
 
+    // 构造 GEP 索引
     std::vector<llvm::Value*> indices;
     indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
     for (int i : subscript) {
         indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), i));
     }
 
-    llvm::Type* baseArrayType = llvm::Type::getInt32Ty(context);
-    for (auto it = symbol->dimensions.rbegin(); it != symbol->dimensions.rend(); it++) {
-        baseArrayType = llvm::ArrayType::get(baseArrayType, *it);
-    }
-
     llvm::Value* gep = builder.CreateGEP(
-        baseArrayType,
+        elementType,
         arrayPtr,
         indices,
         "array_elem"
@@ -703,6 +808,8 @@ llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
     if (symbol->kind == SymbolKind::Int) {
         llvm::Type* valueType = llvm::Type::getInt32Ty(context);
         return builder.CreateLoad(valueType, symbol->addr, ident);
+    } else if (symbol->kind == SymbolKind::Array) {
+        return symbol->addr;
     }
 
     std::cerr << "错误：不支持返回的标识符 " << ident << std::endl;
@@ -727,8 +834,24 @@ void FuncCallExpr::print(int indent) const
 
 llvm::Value* FuncCallExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
-    std::cerr << "暂未实现" << std::endl;
-    return nullptr;
+    const std::string& funcName = name->ident;
+
+    llvm::Function* calleeFunc = module.getFunction(funcName);
+    if (!calleeFunc) {
+        std::cerr << "错误：函数未定义：" << funcName << std::endl;
+        return nullptr;
+    }
+
+    std::vector<llvm::Value*> argsV;
+    if (args) {
+        for (const auto& argExpr: args->args) {
+            llvm::Value* argVal = argExpr->codeGen(builder, context, module);
+            if (!argVal) return nullptr;
+            argsV.push_back(argVal);
+        }
+    }
+
+    return builder.CreateCall(calleeFunc, argsV, funcName + "_call");
 }
 
 // 参数列表节点

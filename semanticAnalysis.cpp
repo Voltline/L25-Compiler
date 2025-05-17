@@ -45,7 +45,8 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
 void SemanticAnalyzer::analyzeFunc(Func& func)
 {
     func.scope = currentScope;
-    enterScope();    
+    enterScope();
+    func.body_scope = currentScope;
     if (func.params) {
         for (const auto& param: func.params->params) {
             // TODO: 这里可能有求值存入value的需求
