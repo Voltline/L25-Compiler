@@ -1,0 +1,17 @@
+program GCD {
+    func gcd(a, b) {
+        let res;
+        if (b == 0) {
+            res = a;
+        } else {
+            res = gcd(b, a % b);
+        };
+        return res;
+    }
+    main {
+        let x;
+        let y;
+        input(x, y);
+        output(gcd(x, y));
+    }
+}

@@ -83,7 +83,7 @@ extern Program* rootProgram;
 %token <ident> IDENT
 
 %token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN
-%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN
+%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
 %left STAR DIVIDE
@@ -465,6 +465,14 @@ term:
     {
         $$ = new BinaryExpr{
             '/', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
+        };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+    }
+    | term MOD factor
+    {
+        $$ = new BinaryExpr{
+            '%', std::unique_ptr<Expr>($1), std::unique_ptr<Expr>($3)
         };
         $$->lineno = @2.first_line;
         $$->column = @2.first_column;

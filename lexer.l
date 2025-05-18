@@ -54,6 +54,7 @@ ident {letter}({letter}|[0-9])*
 "-"         { updateLocationAndColumn(); return MINUS; }
 "*"         { updateLocationAndColumn(); return STAR; }
 "/"         { updateLocationAndColumn(); return DIVIDE; }
+"%"         { updateLocationAndColumn(); return MOD; }
 
 "("         { updateLocationAndColumn(); return LPAREN; }
 ")"         { updateLocationAndColumn(); return RPAREN; }

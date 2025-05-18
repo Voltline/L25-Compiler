@@ -179,7 +179,7 @@ program nestedFuncCall {
 <bool_expr> = <expr> ("==" | "!=" | "<" | "<=" | ">" | ">=") <expr>
 
 <expr> = [ "+" | "-" ] <term> { ("+" | "-") <term> }
-<term> = <factor> { ("*" | "/") <factor> }
+<term> = <factor> { ("*" | "/" | "%") <factor> }
 <factor> = <ident> | <number> | "(" <expr> ")" | <func_call> | <array_subscript_expr>
 
 <array_subscript_expr> = <ident> "[" <array_subscript_list> "]"
@@ -266,10 +266,13 @@ L25-Compiler/
 ├── symbol.cpp
 └── test
     ├── test1.l25
+    ├── test10.l25
     ├── test2.l25
     ├── test3.l25
     ├── test4.l25
     ├── test5.l25
     ├── test6.l25
-    └── test7.l25
+    ├── test7.l25
+    ├── test8.l25
+    └── test9.l25
 ```

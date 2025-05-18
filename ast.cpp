@@ -690,6 +690,8 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
         return builder.CreateMul(LHS, RHS, "multmp");
     case '/':
         return builder.CreateSDiv(LHS, RHS, "divtmp");
+    case '%':
+        return builder.CreateSRem(LHS, RHS, "modtmp");
     default:
         reportError("不支持的二元运算符: " + std::string(1, op));
         return nullptr;
