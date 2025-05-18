@@ -9,6 +9,36 @@
 * The compiler uses L25 grammar with Flex, Bison and LLVM.
 * The compiler is open-source based on MIT License.
 
+## Language Features
+> A series of extensions to the original L25 grammar have now been implemented.
+
+* Nested Functions within Functions(without Closure):
+```L25
+func f1(a) {
+    func f2(b) {
+        let c = b + 10;
+        return c;
+    }
+    let d = a + f2(a) + 20;
+    return d;
+}
+```
+* Definition and Invocation of Multidimensional Arrays:
+```L25
+... 
+main {
+    let a: [2, 3, 4];
+    let d = a[0, 0, 1] + 10;
+}
+```
+* Postponed Type Declarations(Type Annotations Placed after Identifiers):
+```L25
+let a: int;
+let b: int = 10;
+let c = 20;
+let d: [3, 4];
+```
+
 ## Grammar
 > Extended L25 Grammar with EBNF description
 ```
@@ -62,41 +92,24 @@
 <digit> = "0" | "1" | ... | "9"
 ```
 
-## Language Features
-> A series of extensions to the original L25 grammar have now been implemented.
-
-* Nested Functions within Functions:
-```L25
-func f1(a) {
-    func f2(b) {
-        let c = b + 10;
-        return c;
-    }
-    let d = a + f2(a) + 20;
-    return d;
-}
-```
-* Definition and Invocation of Multidimensional Arrays:
-```L25
-... 
-main {
-    let a: [2, 3, 4];
-    let d = a[0, 0, 1] + 10;
-}
-```
-* Postponed Type Declarations(Type Annotations Placed after Identifiers):
-```L25
-let a: int;
-let b: int = 10;
-let c = 20;
-let d: [3, 4];
+## Build Instructions
+### Dependencies
+* LLVM (version >= 16)
+* Flex (version == 2.6.4)
+* Bison (version == 3.8.2)
+* Makefile
+* Clang (version >= 18.0, with C++20 support)
+### Build
+* Just use `make` to compile the project, remember to configure your own llvm path in Makefile
+```bash
+make
+./l25cc --help
 ```
 
 ## Usage
 > Compile and run `.l25` source files with flexible options.
 
 ### Basic Usage
-
 ```bash
 ./l25cc <source.l25> [options]
 ```
@@ -155,18 +168,4 @@ L25-Compiler/
     ├── test5.l25
     ├── test6.l25
     └── test7.l25
-```
-
-## Build Instructions
-### Dependencies
-* LLVM (version >= 16)
-* Flex (version == 2.6.4)
-* Bison (version == 3.8.2)
-* Makefile
-* Clang (version >= 18.0, with C++20 support)
-### Build
-* Just use `make` to compile the project, remember to configure your own llvm path in Makefile
-```bash
-make
-./l25cc --help
 ```
