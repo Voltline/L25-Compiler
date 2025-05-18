@@ -5,6 +5,11 @@
 # L25-Compiler
 > Compiler Principle Final Homework with L25 Language.
 
+![License](https://img.shields.io/github/license/Voltline/L25-Compiler)
+![Issues](https://img.shields.io/github/issues/Voltline/L25-Compiler)
+![Stars](https://img.shields.io/github/stars/Voltline/L25-Compiler)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Voltline/L25-Compiler)
+
 * L25 Language is founded by ECNU Compiler Principle Course Team.
 * The compiler uses L25 grammar with Flex, Bison and LLVM.
 * The compiler is open-source based on MIT License.
