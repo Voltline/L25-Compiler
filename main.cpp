@@ -1,57 +1,156 @@
 #include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <filesystem>
+
 #include <llvm/IR/Function.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
+
 #include "include/ast.h"
 #include "include/semanticAnalysis.h"
 #include "parser.tab.hpp"
 
 extern int yyparse();
+extern FILE* yyin;  // Bison/Flex 使用的输入流
 Program* rootProgram = nullptr;
 bool hasError = false;
 
 int main(int argc, const char* argv[]) 
 {
-    yydebug = argc != 1;
-    // 解析输入的表达式
-    yyparse();
+    std::string inputFile;
+    std::string outputFile = "a.out";
+    bool emitAST = false;
+    bool emitScope = false;
+    bool emitIR = false;
+    bool emitBC = false;
 
-    if (!rootProgram || hasError) {
-        std::cerr << "语法解析失败，停止" << std::endl;
+    // 先扫描是否要显示帮助
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-help" || arg == "--help") {
+            std::cout << "用法: l25cc <source.l25> [options]\n"
+                      << "选项:\n"
+                      << "  -emit-ast      输出 AST\n"
+                      << "  -emit-scope    输出作用域信息\n"
+                      << "  -emit-ir       输出 LLVM IR (.ll)\n"
+                      << "  -emit-bc       输出 LLVM Bitcode (.bc)\n"
+                      << "  -o <file>      指定输出文件名\n"
+                      << "  -help          显示此帮助信息\n";
+            return 0;
+        }
+    }
+
+    // 参数解析
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "-emit-ast") emitAST = true;
+        else if (arg == "-emit-scope") emitScope = true;
+        else if (arg == "-emit-ir") emitIR = true;
+        else if (arg == "-emit-bc") emitBC = true;
+        else if (arg == "-o" && i + 1 < argc) {
+            outputFile = argv[++i];
+        }
+        else if (inputFile.empty() && std::filesystem::exists(arg)) {
+            inputFile = arg;
+        }
+        else {
+            std::cerr << "未知参数或无效文件: " << arg << "\n";
+            return 1;
+        }
+    }
+
+    if (inputFile.empty()) {
+        std::cerr << "未指定源代码文件，请使用 --help 查看用法\n";
         return 1;
     }
 
-    rootProgram->print();
+    // 打开源文件
+    FILE* input = fopen(inputFile.c_str(), "r");
+    if (!input) {
+        std::cerr << "无法打开输入文件: " << inputFile << "\n";
+        return 1;
+    }
+    yyin = input;
+
+    // 开始解析
+    yyparse();
+    fclose(input);
+
+    if (!rootProgram || hasError) {
+        std::cerr << "语法解析失败，停止\n";
+        return 1;
+    }
+
+    if (emitAST)
+        rootProgram->print();
 
     SemanticAnalyzer analyzer;
     analyzer.analyze(*rootProgram);
 
     if (hasError) {
-        std::cerr << "语义检查出错，停止" << std::endl;
+        std::cerr << "语义分析失败，停止\n";
         return 1;
-    } else {
-        std::cout << "语义检查完成" << std::endl;
     }
 
-    rootProgram->scope->print();
+    if (emitScope && rootProgram->scope)
+        rootProgram->scope->print();
 
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder(context);
-    llvm::Module module("L25", context);
 
-    // 生成表达式并将其值打印出来
+    // 使用输入文件名作为 module 名
+    llvm::Module module(std::filesystem::path(inputFile).filename().string(), context);
+
     llvm::Value* val = rootProgram->codeGen(builder, context, module);
     if (!val || hasError) {
-        std::cerr << "LLVM IR生成失败，停止" << std::endl;
+        std::cerr << "IR生成失败，停止\n";
         return 1;
     }
 
-    // 输出完整 IR 到标准输出
-    module.print(llvm::outs(), nullptr);  // 输出完整 IR
+    if (emitIR || emitBC || outputFile.ends_with(".ll") || outputFile.ends_with(".bc")) {
+        std::error_code EC;
+        llvm::raw_fd_ostream out(outputFile, EC, llvm::sys::fs::OF_None);
+        if (EC) {
+            std::cerr << "无法写入输出文件: " << EC.message() << "\n";
+            return 1;
+        }
 
-    // 清理资源
+        if (emitBC || outputFile.ends_with(".bc")) {
+            llvm::WriteBitcodeToFile(module, out);
+        } else {
+            module.print(out, nullptr);  // 输出 .ll 格式
+        }
+        out.flush();
+    } else {
+        // 如果用户希望得到可执行文件
+        std::string llFile = "tmp.ll";
+        std::string bcFile = "tmp.bc";
+
+        {
+            std::error_code EC;
+            llvm::raw_fd_ostream out(llFile, EC, llvm::sys::fs::OF_None);
+            module.print(out, nullptr);
+            out.flush();
+        }
+
+        std::string cmd = "llvm-as " + llFile + " -o " + bcFile + " && clang " + bcFile + " -o " + outputFile;
+        int ret = system(cmd.c_str());
+        if (ret != 0) {
+            std::cerr << "链接失败: llvm-as 或 clang 报错\n";
+            return 1;
+        }
+
+        std::filesystem::remove(llFile);
+        std::filesystem::remove(bcFile);
+    }
+
     delete rootProgram;
-
     return 0;
 }

@@ -52,10 +52,6 @@ Scope* Scope::createChild()
 {
     // 写法等价于下面的语句
     // std::unique_ptr<Scope>(new Scope(this));
-    if (!this) {
-        std::cerr << "错误：当前作用域无效，无法创建子域" << std::endl;
-        return nullptr;
-    }
     children.emplace_back(std::make_unique<Scope>(this));
     return children.back().get();
 }

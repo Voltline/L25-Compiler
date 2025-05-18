@@ -57,6 +57,8 @@ struct ASTNode
     Scope* scope; 
     int lineno;
     int column;
+
+    void reportError(const std::string& msg) const;
 };
 
 // 程序节点

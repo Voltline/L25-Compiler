@@ -70,8 +70,10 @@ ident {letter}({letter}|[0-9])*
 "//".*"\n"  { yycolumn = 1; }        // 单行注释也更新列号
 
 .           {
-                fprintf(stderr, "[词法错误] 未知字符 '%s' 位于第 %d 行, 第 %d 列\n",
-                      yytext, yylineno, yycolumn);
+                fprintf(stderr,
+                "\033[1;31m[词法错误]\033[0m "
+                "未知字符 '%s' 位于 \033[1;33m第 %d 行, 第 %d 列\033[0m\n",
+                yytext, yylineno, yycolumn);
                 hasError = true;
                 yycolumn += yyleng;
                 return yytext[0];
