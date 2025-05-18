@@ -50,3 +50,5 @@ main.o: main.cpp
 
 clean:
 	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output
+
+.phony: all clean
