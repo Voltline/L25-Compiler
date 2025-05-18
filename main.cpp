@@ -8,6 +8,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
+#include <llvm/TargetParser/Host.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -107,6 +108,8 @@ int main(int argc, const char* argv[])
 
     // 使用输入文件名作为 module 名
     llvm::Module module(std::filesystem::path(inputFile).filename().string(), context);
+    // 修改Triple信息以适应平台
+    module.setTargetTriple(llvm::sys::getDefaultTargetTriple());
 
     llvm::Value* val = rootProgram->codeGen(builder, context, module);
     if (!val || hasError) {

@@ -12,7 +12,9 @@ BISON = /opt/homebrew/Cellar/bison/3.8.2/bin/bison
 CXXFLAGS += -std=c++20 \
 			-Wall \
 			-I/opt/homebrew/Cellar/flex/2.6.4_2/include \
-			-g
+			-g \
+			-fsanitize=address \
+			-fno-omit-frame-pointer
 LLVMFLAGS = -L$(LLVM_LIB) -lLLVM
 
 all: l25cc
