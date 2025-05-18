@@ -188,7 +188,7 @@ program nestedFuncCall {
 <dim_list> = <number> {"," <number> }
 <type_info> = "int" | "[" <dim_list> "]"
 
-<input_arg_list> = <ident> { "," <ident> }
+<input_arg_list> = ( <ident> | <array_subscript_expr> ) { "," ( <ident> | <array_subscript_expr> ) }
 
 <ident> = <letter> { <letter> | <digit> }
 <number> = <digit> { <digit> }

@@ -212,6 +212,11 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
     if (typeInfo.kind == SymbolKind::Int) {
         // 普通整形的分配
         alloca = builder.CreateAlloca(intType, nullptr, ident_name);
+        // 赋初值0 
+        if (!expr) {
+            llvm::Value* zeroInit = llvm::ConstantInt::get(intType, 0);
+            builder.CreateStore(zeroInit, alloca);
+        }
     } else if (typeInfo.kind == SymbolKind::Array) {
         // 多维数组的分配
         llvm::Type* arrayType = intType;
@@ -264,7 +269,6 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
             if (typeInfo.kind == SymbolKind::Int) {
                 builder.CreateStore(initVal, alloca);
             }
-            // TODO: 数组初始化还没做呢（目前只是零初始化）
         }
     }
     return alloca;
@@ -468,7 +472,7 @@ llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
 }
 
 // 输入语句节点
-InputStmt::InputStmt(std::vector<std::unique_ptr<IdentExpr>> idents)
+InputStmt::InputStmt(std::vector<std::unique_ptr<Expr>> idents)
     : idents(std::move(idents)) {}
 
 InputStmt::InputStmt(std::unique_ptr<InputArgList> args)
@@ -496,24 +500,33 @@ llvm::Value* InputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
 
     llvm::Value* formatStr = builder.CreateGlobalString("%d");
 
-    for (const auto& ident: idents) {
+    for (auto& ident: idents) {
         assert(scope && "InputStmt::codeGen 中的 scope 为空");
-        SymbolInfo* symbol = scope->lookup(ident->ident);
-        if (!symbol) {
-            reportError("变量: " + ident->ident + " 未声明");
-            return nullptr;
-        }
+        llvm::Value* addr = nullptr;
+        if (auto* idExpr = dynamic_cast<IdentExpr*>(ident.get())) {
+            SymbolInfo* symbol = scope->lookup(idExpr->ident);
+            if (!symbol) {
+                reportError("变量: " + idExpr->ident + " 未声明");
+                return nullptr;
+            }
 
-        if (symbol->kind == SymbolKind::Array) {
-            reportError("不支持直接输入数组: " + ident->ident);
-            continue;
-        }
+            if (symbol->kind == SymbolKind::Array) {
+                reportError("不支持直接输入数组: " + idExpr->ident);
+                continue;
+            }
 
-        if (!symbol->addr) {
-            reportError("变量: " + ident->ident + " 未分配空间");
-            return nullptr;
+            if (!symbol->addr) {
+                reportError("变量: " + idExpr->ident + " 未分配空间");
+                return nullptr;
+            }
+            addr = symbol->addr;
+        } else if (auto* arraySubscriptExpr = dynamic_cast<ArraySubscriptExpr*>(ident.get())) {
+            addr = arraySubscriptExpr->getAddress(builder, context, module);
+            if (!addr) {
+                reportError("数组下标访问异常");
+            }
         }
-        builder.CreateCall(scanfFunc, { formatStr, symbol->addr });
+        builder.CreateCall(scanfFunc, { formatStr, addr });
     }
     return nullptr;
 }
@@ -936,7 +949,7 @@ llvm::Value* ParamList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
 }
 
 // 输入函数参数列表节点
-InputArgList::InputArgList(std::vector<std::unique_ptr<IdentExpr>> idents)
+InputArgList::InputArgList(std::vector<std::unique_ptr<Expr>> idents)
     : idents(std::move(idents)) {}
 
 void InputArgList::print(int indent) const

@@ -135,10 +135,17 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             }
         }
     } else if (auto inputStmt = dynamic_cast<const InputStmt*>(&stmt)) {
-        for (const auto& ident: inputStmt->idents) {
-            if (!checkSymbolExists(ident->ident)) {
-                reportError(*ident, "变量未声明：" + ident->ident);
+        for (auto& ident: inputStmt->idents) {
+            if (const auto* idExpr = dynamic_cast<IdentExpr*>(ident.get())) {
+                if (!checkSymbolExists(idExpr->ident)) {
+                    reportError(*idExpr, "变量未声明：" + idExpr->ident);
+                }
+            } else if (auto* arraySubscriptExpr = dynamic_cast<ArraySubscriptExpr*>(ident.get())) {
+                analyzeExpr(*arraySubscriptExpr);
+            } else {
+                reportError(*ident, "不允许出现在输入列表的类型");
             }
+
         }
     } else if (auto outputStmt = dynamic_cast<const OutputStmt*>(&stmt)) {
         for (const auto& expr: outputStmt->idents) {
@@ -182,7 +189,7 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
 
         if (funcCallExpr->args) {
             if (funcCallExpr->args->args.size() != funcSymbol->paramTypes.size()) {
-                reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，，但调用时传入" + std::to_string(funcCallExpr->args->args.size()) + "个参数");
+                reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，但调用时传入" + std::to_string(funcCallExpr->args->args.size()) + "个参数");
                     return;
             }
             // TODO: 加上参数对应类型检查，这里还有数组传入的问题

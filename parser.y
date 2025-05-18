@@ -185,15 +185,25 @@ param_list:
 input_arg_list:
     IDENT
     {
-        $$ = new InputArgList(std::vector<std::unique_ptr<IdentExpr>>());
+        $$ = new InputArgList(std::vector<std::unique_ptr<Expr>>());
         $$->idents.push_back(std::make_unique<IdentExpr>(*$1, TypeInfo{ SymbolKind::Int, {} }));
         delete $1;
+    }
+    | array_subscript_expr
+    {
+        $$ = new InputArgList(std::vector<std::unique_ptr<Expr>>());
+        $$->idents.push_back(std::unique_ptr<Expr>($1));
     }
     | input_arg_list COMMA IDENT
     {
         $$ = $1;
         $$->idents.push_back(std::make_unique<IdentExpr>(*$3, TypeInfo{ SymbolKind::Int, {} }));
         delete $3;
+    }
+    | input_arg_list COMMA array_subscript_expr
+    {
+        $$ = $1;
+        $$->idents.push_back(std::unique_ptr<Expr>($3));
     }
     ;
 

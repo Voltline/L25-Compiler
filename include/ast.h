@@ -174,9 +174,9 @@ struct FuncCallStmt: public Stmt
 // 输入语句节点
 struct InputStmt: public Stmt
 {
-    std::vector<std::unique_ptr<IdentExpr>> idents;
+    std::vector<std::unique_ptr<Expr>> idents;
 
-    InputStmt(std::vector<std::unique_ptr<IdentExpr>> idents);
+    InputStmt(std::vector<std::unique_ptr<Expr>> idents);
 
     InputStmt(std::unique_ptr<InputArgList> args);
 
@@ -326,9 +326,9 @@ struct ParamList: public ASTNode
  */
 struct InputArgList: public ASTNode
 {
-    std::vector<std::unique_ptr<IdentExpr>> idents;
+    std::vector<std::unique_ptr<Expr>> idents;
 
-    InputArgList(std::vector<std::unique_ptr<IdentExpr>> idents);
+    InputArgList(std::vector<std::unique_ptr<Expr>> idents);
 
     void print(int indent = 0) const override;
 
