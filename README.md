@@ -14,10 +14,11 @@
 * The compiler uses L25 grammar with Flex, Bison and LLVM.
 * The compiler is open-source based on MIT License.
 
-## Language Features
+## Language Features & Examples
 > A series of extensions to the original L25 grammar have now been implemented.
 
-* Nested Functions within Functions(without Closure):
+### Features
+* *Nested Functions within Functions(without Closure)*:
 ```L25
 func f1(a) {
     func f2(b) {
@@ -28,7 +29,9 @@ func f1(a) {
     return d;
 }
 ```
-* Definition and Invocation of Multidimensional Arrays:
+&emsp; Although nested functions are allowed, inner functions **cannot access symbols in the outer scope**.
+
+* *Definition and Invocation of Multidimensional Arrays*:
 ```L25
 ... 
 main {
@@ -36,12 +39,108 @@ main {
     let d = a[0, 0, 1] + 10;
 }
 ```
-* Postponed Type Declarations(Type Annotations Placed after Identifiers):
+
+* *Postponed Type Declarations(Type Annotations Placed after Identifiers)*:
 ```L25
 let a: int;
 let b: int = 10;
 let c = 20;
 let d: [3, 4];
+```
+
+* *Every statement-list has `at least one statement`*:
+```L25
+// ✅ Right Example
+func rightFunc(a, b)
+{
+    let res = a + b; // ✅ At least one statement
+    return res;
+}
+
+// ❌ Wrong Example
+func wrongFunc(a, b)
+{
+    return a + b; // ❌ No statement is not allowed.
+}
+```
+
+* *Every statement ends with `semicolon`*:
+```L25
+func f(a, b) 
+{
+    let res;
+    if (a > b) {
+        res = a;
+    } else {
+        res = b;
+    }; // ⚠️ Remember to add semicolon
+    return res;
+}
+```
+
+### Examples
+* Fibonacci Calculate:
+```L25
+program fibonacci {
+    func fibs(n) {
+        let tmp:[3];
+        tmp[0] = 1;
+        tmp[1] = 1;
+        let i = 2;
+        while (i <= n) {
+            tmp[2] = tmp[0] + tmp[1];
+            tmp[0] = tmp[1];
+            tmp[1] = tmp[2];
+            i = i + 1;
+        };
+        return tmp[2];
+    }
+
+    main {
+        let n = 0;
+        input(n);
+        output(fibs(n));
+    }
+}
+```
+
+* Multidimensional Array Operations:
+```L25
+program arr {
+    main {
+        let a:[3, 3];
+        let i = 0;
+        while (i < 3) {
+            a[i, i] = i * 123;
+            i = i + 1;
+        };
+        let idx = 0;
+        while (idx < 3) {
+            output(a[idx, 0], a[idx, 1], a[idx, 2]);
+            idx  = idx + 1;
+        };
+    }
+}
+```
+
+* Nested Function Call:
+```L25
+program nestedFuncCall {
+    func f(n) {
+        let m = n + 1;
+        func f2(m) {
+            let x = m + 1;
+            return x;
+        };
+        return m + f2(m);
+    }
+
+    main {
+        let n = 0;
+        input(n);
+        output(f(n));
+    }
+}
 ```
 
 ## Grammar
