@@ -102,28 +102,38 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeExpr(*arrayAssign);
             analyzeExpr(*assign->expr);
         }
-    } else if (auto ifStmt = dynamic_cast<const IfStmt*>(&stmt)) {
+    } else if (auto ifStmt = dynamic_cast<IfStmt*>(&stmt)) {
         const auto& boolExpr = *ifStmt->condition;
         analyzeExpr(*boolExpr.lhs);
         analyzeExpr(*boolExpr.rhs);
 
+        enterScope();
+        ifStmt->ifScope = currentScope;
         for (const auto& stmt: ifStmt->if_body->stmts) {
             analyzeStmt(*stmt);
         }
+        exitScope();
 
         if (ifStmt->else_body) {
+            enterScope();
+            ifStmt->elseScope = currentScope;
+
             for (const auto& stmt: ifStmt->else_body->stmts) {
                 analyzeStmt(*stmt);
             }
+            exitScope();
         }
-    } else if (auto whileStmt = dynamic_cast<const WhileStmt*>(&stmt)) {
+    } else if (auto whileStmt = dynamic_cast<WhileStmt*>(&stmt)) {
         const auto& boolExpr = *whileStmt->condition;
         analyzeExpr(*boolExpr.lhs);
         analyzeExpr(*boolExpr.rhs);
 
+        enterScope();
+        whileStmt->loopBodyScope = currentScope;
         for (const auto& stmt: whileStmt->loop_body->stmts) {
             analyzeStmt(*stmt);
         }
+        exitScope();
     } else if (auto funcCallStmt = dynamic_cast<const FuncCallStmt*>(&stmt)) {
         if (!checkSymbolExists(funcCallStmt->name->ident)) {
             reportError(*funcCallStmt, "函数未声明：" + funcCallStmt->name->ident);

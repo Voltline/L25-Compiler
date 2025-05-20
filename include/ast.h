@@ -137,6 +137,8 @@ struct IfStmt: public Stmt {
     std::unique_ptr<BoolExpr> condition;
     std::unique_ptr<StmtList> if_body;
     std::unique_ptr<StmtList> else_body; // Nullable
+    Scope* ifScope;
+    Scope* elseScope;
 
     IfStmt(std::unique_ptr<BoolExpr> condition, std::unique_ptr<StmtList> if_body, std::unique_ptr<StmtList> else_body);
 
@@ -150,6 +152,7 @@ struct WhileStmt: public Stmt
 {
     std::unique_ptr<BoolExpr> condition;
     std::unique_ptr<StmtList> loop_body;
+    Scope* loopBodyScope;
 
     WhileStmt(std::unique_ptr<BoolExpr> condition, std::unique_ptr<StmtList> loop_body);
     

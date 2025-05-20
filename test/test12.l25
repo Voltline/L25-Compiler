@@ -1,0 +1,17 @@
+program Scope {
+    func f() {
+        let a = 0;
+        let res;
+        while (a < 20) {
+            let tmp;
+            input(tmp);
+            a = a + tmp;
+            res = res + a;
+        };
+        return res;
+    }
+    main {
+        let res = f();
+        output(res);
+    }
+}
