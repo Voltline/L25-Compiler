@@ -24,7 +24,7 @@ func f1(a) {
     func f2(b) {
         let c = b + 10;
         return c;
-    }
+    };
     let d = a + f2(a) + 20;
     return d;
 }
