@@ -162,6 +162,15 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeExpr(*expr);
         }
     } else if (auto funcDefStmt = dynamic_cast<Func*>(&stmt)) {
+        const std::string& funcName = funcDefStmt->name->ident;
+
+        if (checkSameScopeSymbolExists(funcName)) {
+            reportError(*funcDefStmt, "函数 " + funcName + " 重定义");
+            return;
+        }
+
+        SymbolInfo funcInfo{ funcName, *funcDefStmt };
+        declareSymbol(funcName, funcInfo);
         analyzeFunc(*funcDefStmt);
     }
 }

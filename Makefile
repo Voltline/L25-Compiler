@@ -1,6 +1,6 @@
 # 设置LLVM的路径（假设安装在默认位置）
-LLVM_INCLUDE = /opt/homebrew/Cellar/llvm/20.1.4_1/include
-LLVM_LIB = /opt/homebrew/Cellar/llvm/20.1.4_1/lib
+LLVM_INCLUDE = /opt/homebrew/Cellar/llvm/20.1.5/include
+LLVM_LIB = /opt/homebrew/Cellar/llvm/20.1.5/lib
 
 CXXFLAGS += -I$(LLVM_INCLUDE)  
 

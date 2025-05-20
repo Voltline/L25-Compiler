@@ -153,9 +153,9 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
 
     for (const auto& stmt: stmts->stmts) {
         if (dynamic_cast<const Func*>(stmt.get())) {
-            llvm::BasicBlock* beforeNested = builder.GetInsertBlock();
+            llvm::IRBuilder<>::InsertPoint savedIP = builder.saveIP();
             stmt->codeGen(builder, context, module);
-            builder.SetInsertPoint(beforeNested);
+            builder.restoreIP(savedIP);
         } else {
             stmt->codeGen(builder, context, module);
         }
@@ -182,8 +182,14 @@ void StmtList::print(int indent) const
 llvm::Value* StmtList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
 {
     llvm::Value* last = nullptr;
-    for (const auto& stmt: stmts) {
-        last = stmt->codeGen(builder, context, module);
+    for (auto& stmt: stmts) {
+        if (auto* funcDefStmt = dynamic_cast<Func*>(stmt.get())) {
+            auto *currInsertPoint = builder.GetInsertBlock();
+            last = funcDefStmt->codeGen(builder, context, module);
+            builder.SetInsertPoint(currInsertPoint);
+        } else {
+            last = stmt->codeGen(builder, context, module);
+        }
     }
     return last;
 }

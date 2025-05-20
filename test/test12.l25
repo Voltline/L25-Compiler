@@ -3,10 +3,23 @@ program Scope {
         let a = 0;
         let res;
         while (a < 20) {
-            let tmp;
-            input(tmp);
-            a = a + tmp;
+            func inner(a) {
+                let res = 5;
+                return a + res;
+            };
+            a = a + inner(a);
+            output(a);
             res = res + a;
+        };
+        if (a > 20) {
+            func inner2(a) {
+                while (a < 100) {
+                    a = a + 20;
+                    output(a);
+                };
+                return a;
+            };
+            res = res + inner2(a);
         };
         return res;
     }
