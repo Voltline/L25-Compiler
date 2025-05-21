@@ -12,14 +12,14 @@ program Scope {
             res = res + a;
         };
         if (a > 20) {
-            func inner2(a) {
+            func inner(a, b) {
                 while (a < 100) {
                     a = a + 20;
                     output(a);
                 };
                 return a;
             };
-            res = res + inner2(a);
+            res = res + inner(a, 0);
         };
         return res;
     }

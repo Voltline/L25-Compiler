@@ -29,6 +29,7 @@ struct SymbolInfo
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
     llvm::Value* addr = nullptr;        // LLVM变量栈地址
     bool isFuncParam = false;           // 是否为函数参数(影响数组访问)
+    std::string llvmName = "";               // LLVM中的唯一名字
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

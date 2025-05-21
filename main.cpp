@@ -100,9 +100,6 @@ int main(int argc, const char* argv[])
         return 1;
     }
 
-    if (emitScope && rootProgram->scope)
-        rootProgram->scope->print();
-
     llvm::LLVMContext context;
     llvm::IRBuilder<> builder(context);
 
@@ -116,6 +113,9 @@ int main(int argc, const char* argv[])
         std::cerr << "IR生成失败，停止\n";
         return 1;
     }
+
+    if (emitScope && rootProgram->scope)
+        rootProgram->scope->print();
 
     if (emitIR || emitBC || outputFile.ends_with(".ll") || outputFile.ends_with(".bc")) {
         std::error_code EC;
@@ -153,6 +153,7 @@ int main(int argc, const char* argv[])
         std::filesystem::remove(llFile);
         std::filesystem::remove(bcFile);
     }
+
 
     delete rootProgram;
     return 0;

@@ -1,6 +1,8 @@
 #include "include/ast.h"
 #include <llvm/IR/Type.h>
+#include <unordered_map>
 extern bool hasError;
+std::unordered_map<std::string, int> functionMap;
 
 // TypeInfo 方法
 TypeInfo::TypeInfo()
@@ -120,13 +122,23 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
             argTypes.push_back(llvm::Type::getInt32Ty(context));
         }
     }
+    
+    if (!functionMap.contains(funcName)) {
+        functionMap[funcName] = 1;
+        funcSymbol->llvmName = funcName;
+    } else {
+        std::string tmpName = funcName + "." + std::to_string(functionMap[funcName]);
+        funcSymbol->llvmName = tmpName;
+        functionMap[funcName]++;
+    }
 
     llvm::FunctionType* funcType = llvm::FunctionType::get(
         llvm::Type::getInt32Ty(context), argTypes, false
     );
 
+    std::string funcLLVMName = funcSymbol->llvmName;
     llvm::Function* function = llvm::Function::Create(
-        funcType, llvm::Function::ExternalLinkage, funcName, module
+        funcType, llvm::Function::ExternalLinkage, funcLLVMName, module
     );
 
     funcSymbol->value = function; // 更新函数指针
@@ -457,11 +469,13 @@ llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
 {
     const std::string& funcName = name->ident;
 
-    llvm::Function* calleeFunc = module.getFunction(funcName);
-    if (!calleeFunc) {
+    SymbolInfo* funcSymbol = scope->lookup(funcName);
+    if (!funcSymbol || funcSymbol->kind != SymbolKind::Function) {
         reportError("函数: " + funcName + " 未定义");
         return nullptr;
     }
+    std::string funcLLVMName = funcSymbol->llvmName;
+    llvm::Function* calleeFunc = module.getFunction(funcLLVMName);
 
     std::vector<llvm::Value*> argsV;
     if (args) {
@@ -472,9 +486,8 @@ llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
         }
     }
 
-    // 调用函数，不关心返回值
     builder.CreateCall(calleeFunc, argsV);
-    return nullptr; // 作为语句，不返回值
+    return nullptr; // 作为语句，不返回值 
 }
 
 // 输入语句节点
@@ -902,11 +915,13 @@ llvm::Value* FuncCallExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
 {
     const std::string& funcName = name->ident;
 
-    llvm::Function* calleeFunc = module.getFunction(funcName);
-    if (!calleeFunc) {
+    SymbolInfo* funcSymbol = scope->lookup(funcName);
+    if (!funcSymbol || funcSymbol->kind != SymbolKind::Function) {
         reportError("函数: " + funcName + " 未定义");
         return nullptr;
     }
+    std::string funcLLVMName = funcSymbol->llvmName;
+    llvm::Function* calleeFunc = module.getFunction(funcLLVMName);
 
     std::vector<llvm::Value*> argsV;
     if (args) {
