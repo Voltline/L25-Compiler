@@ -1,32 +1,48 @@
-# 设置LLVM的路径（假设安装在默认位置）
-LLVM_INCLUDE = /opt/homebrew/Cellar/llvm/20.1.5/include
-LLVM_LIB = /opt/homebrew/Cellar/llvm/20.1.5/lib
+# 自动检测平台，配置 FLEX 和 BISON 路径
+UNAME_S := $(shell uname -s)
 
-CXXFLAGS += -I$(LLVM_INCLUDE)  
+ifeq ($(UNAME_S),Darwin)
+  # macOS 使用 Homebrew 安装的 flex 和 bison
+  BREW_PREFIX := $(shell brew --prefix)
+  FLEX := $(BREW_PREFIX)/opt/flex/bin/flex
+  BISON := $(BREW_PREFIX)/opt/bison/bin/bison
+  FLEX_INCLUDE := $(BREW_PREFIX)/opt/flex/include
+else
+  # Linux 或其他系统直接用系统自带的
+  FLEX := flex
+  BISON := bison
+  FLEX_INCLUDE := /usr/include
+endif
 
-# 使用Clang++编译器和Flex、Bison路径
+# 使用 llvm-config 自动获取 LLVM 编译参数，并过滤掉 -std=
+LLVM_CONFIG = llvm-config
+LLVM_CXXFLAGS_RAW = $(shell $(LLVM_CONFIG) --cxxflags)
+LLVM_CXXFLAGS = $(filter-out -std=%,$(LLVM_CXXFLAGS_RAW))
+LLVM_LDFLAGS = $(shell $(LLVM_CONFIG) --ldflags)
+LLVM_LIBS = $(shell $(LLVM_CONFIG) --libs)
+
+# 编译器
 CXX = clang++
-FLEX = /opt/homebrew/Cellar/flex/2.6.4_2/bin/flex
-BISON = /opt/homebrew/Cellar/bison/3.8.2/bin/bison
 
-CXXFLAGS += -std=c++20 \
-			-Wall \
-			-I/opt/homebrew/Cellar/flex/2.6.4_2/include \
-			-g \
-			-fsanitize=address \
-			-fno-omit-frame-pointer
-LLVMFLAGS = -L$(LLVM_LIB) -lLLVM
+# 基础编译选项
+BASE_CXXFLAGS = -std=c++20 -Wall $(LLVM_CXXFLAGS) -I$(FLEX_INCLUDE)
 
+# 默认编译选项
+CXXFLAGS ?= $(BASE_CXXFLAGS)
+
+# 默认目标
 all: l25cc
 
-l25cc: lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o 
-	$(CXX) $(CXXFLAGS) $(LLVMFLAGS) -o l25cc lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o
+# debug 目标，附加调试和地址消毒器选项
+debug: CXXFLAGS += -g -fsanitize=address -fno-omit-frame-pointer
+debug: l25cc
 
-# Bison - 生成 parser.tab.cpp 和 parser.tab.h
+l25cc: lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o 
+	$(CXX) $(CXXFLAGS) $(LLVM_LDFLAGS) $(LLVM_LIBS) -o l25cc lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o
+
 parser.tab.cpp parser.tab.h: parser.y
 	$(BISON) -d -t -v -o parser.tab.cpp parser.y
 
-# Flex - 生成 lexer.cpp
 lexer.cpp: lexer.l parser.tab.h
 	$(FLEX) --nounput -o lexer.cpp lexer.l 
 
@@ -51,4 +67,4 @@ main.o: main.cpp
 clean:
 	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output
 
-.phony: all clean
+.PHONY: all clean debug
