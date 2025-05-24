@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
