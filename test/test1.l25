@@ -4,12 +4,13 @@ program test {
         return a + b + d;
     }
     func f2(a, b, c: int) {
-        let d: [30, 40, 50, 60];
-        return a + b + f1();
+        let d: [3, 4];
+        return a + b + f1(a, b, d, c);
     }
     main {
-        let a: [30, 40, 50, 60, 70];
-        let b = f1() + f2();
+        let a: [3, 4];
+        let b = f1(1, 2, a, 1234) + f2(3, 4, 5);
         let c: int = b;
+        output(b + c);
     }
 }

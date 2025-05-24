@@ -1,0 +1,24 @@
+program test13 {
+    main {
+        let a = 10;
+        // while (a < 100) {
+        //     while (a < 50) {
+        //         if (a > 20) {
+        //             a = a + 30;
+        //         } else {
+        //             a = a + 10;
+        //         };
+        //     };
+        //     a = a + 20;
+        // };
+        if (a > 5) {
+            while (a < 100) {
+                a = a + 10;
+            };
+        } else {
+            a = a + 20;
+            output(a);
+        };
+        output(a);
+    }
+}

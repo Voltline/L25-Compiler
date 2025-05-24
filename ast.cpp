@@ -37,46 +37,46 @@ void Program::print(int indent) const
     main_body->print(indent + 2);
 }
 
-llvm::Value* Program::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* Program::codeGen(CodeGenContext& ctx) const  
 {
     // 声明printf函数，用于后续的输出
-    if (!module.getFunction("printf")) {
+    if (!ctx.module.getFunction("printf")) {
         llvm::FunctionType* printfType = llvm::FunctionType::get(
-            llvm::IntegerType::getInt32Ty(context),
-            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            llvm::IntegerType::getInt32Ty(ctx.context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
             true // 可变参数
         );
-        llvm::Function::Create(printfType, llvm::Function::ExternalLinkage, "printf", module);
+        llvm::Function::Create(printfType, llvm::Function::ExternalLinkage, "printf", ctx.module);
     }
 
     // 声明scanf函数，用于后续的输入
-    if (!module.getFunction("scanf")) {
+    if (!ctx.module.getFunction("scanf")) {
         llvm::FunctionType* scanfType = llvm::FunctionType::get(
-            llvm::IntegerType::getInt32Ty(context),
-            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            llvm::IntegerType::getInt32Ty(ctx.context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
             true // 可变参数
         );
-        llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", module);
+        llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", ctx.module);
     }
 
     // 函数部分
     for (auto& function: functions) {
-        function->codeGen(builder, context, module);
+        function->codeGen(ctx);
     }
 
     // main函数
-    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
-    llvm::Function* mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", module);
+    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getInt32Ty(ctx.context), false);
+    llvm::Function* mainFunc = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", ctx.module);
 
     // 入口基本块
-    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", mainFunc);
-    builder.SetInsertPoint(entry);
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", mainFunc);
+    ctx.builder.SetInsertPoint(entry);
 
     // 生成main_body的IR
-    main_body->codeGen(builder, context, module);
+    main_body->codeGen(ctx);
 
     // 添加默认返回
-    builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+    ctx.builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));
     return mainFunc;
 }
 
@@ -98,7 +98,7 @@ void Func::print(int indent) const
     return_value->print(indent + 2);
 }
 
-llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* Func::codeGen(CodeGenContext& ctx) const  
 {
     const std::string funcName= name->ident;
 
@@ -112,14 +112,14 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
     for (const auto& typeInfo: funcSymbol->paramTypes) {
         if (typeInfo.kind == SymbolKind::Array) {
             // 数组退化成指针
-            llvm::Type* elementType = llvm::Type::getInt32Ty(context);
+            llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
             llvm::Type* arrayType = elementType;
             for (int i = typeInfo.dims.size() - 1; i >= 0; i--) {
                 arrayType = llvm::ArrayType::get(arrayType, typeInfo.dims[i]);
             }
             argTypes.push_back(llvm::PointerType::get(arrayType, 0));
         } else {
-            argTypes.push_back(llvm::Type::getInt32Ty(context));
+            argTypes.push_back(llvm::Type::getInt32Ty(ctx.context));
         }
     }
     
@@ -133,18 +133,18 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
     }
 
     llvm::FunctionType* funcType = llvm::FunctionType::get(
-        llvm::Type::getInt32Ty(context), argTypes, false
+        llvm::Type::getInt32Ty(ctx.context), argTypes, false
     );
 
     std::string funcLLVMName = funcSymbol->llvmName;
     llvm::Function* function = llvm::Function::Create(
-        funcType, llvm::Function::ExternalLinkage, funcLLVMName, module
+        funcType, llvm::Function::ExternalLinkage, funcLLVMName, ctx.module
     );
 
     funcSymbol->value = function; // 更新函数指针
 
-    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", function);
-    builder.SetInsertPoint(entry);
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
+    ctx.builder.SetInsertPoint(entry);
 
     int idx = 0;
     for (auto& arg: function->args()) {
@@ -155,8 +155,8 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
             // 数组：直接把传入的指针存储在 alloca 里
             argInfo->addr = &arg;
         } else {
-            llvm::AllocaInst* alloca = builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
-            builder.CreateStore(&arg, alloca);
+            llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
+            ctx.builder.CreateStore(&arg, alloca);
             argInfo->addr = alloca;
         }
         argInfo->value = &arg;
@@ -165,16 +165,16 @@ llvm::Value* Func::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& contex
 
     for (const auto& stmt: stmts->stmts) {
         if (dynamic_cast<const Func*>(stmt.get())) {
-            llvm::IRBuilder<>::InsertPoint savedIP = builder.saveIP();
-            stmt->codeGen(builder, context, module);
-            builder.restoreIP(savedIP);
+            llvm::IRBuilder<>::InsertPoint savedIP = ctx.builder.saveIP();
+            stmt->codeGen(ctx);
+            ctx.builder.restoreIP(savedIP);
         } else {
-            stmt->codeGen(builder, context, module);
+            stmt->codeGen(ctx);
         }
     }
 
-    llvm::Value* retVal = return_value->codeGen(builder, context, module);
-    builder.CreateRet(retVal);
+    llvm::Value* retVal = return_value->codeGen(ctx);
+    ctx.builder.CreateRet(retVal);
 
     return function;
 }
@@ -191,18 +191,32 @@ void StmtList::print(int indent) const
     }
 }
 
-llvm::Value* StmtList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* StmtList::codeGen(CodeGenContext& ctx) const 
 {
     llvm::Value* last = nullptr;
-    for (auto& stmt: stmts) {
-        if (auto* funcDefStmt = dynamic_cast<Func*>(stmt.get())) {
-            auto *currInsertPoint = builder.GetInsertBlock();
-            last = funcDefStmt->codeGen(builder, context, module);
-            builder.SetInsertPoint(currInsertPoint);
-        } else {
-            last = stmt->codeGen(builder, context, module);
+
+    ctx.currentBlock = ctx.builder.GetInsertBlock(); // 初始插入点
+
+    for (auto& stmt : stmts) {
+        if (ctx.currentBlock->getTerminator()) {
+            // 该块已终结，不再插入后续语句
+            break;
         }
+
+        ctx.builder.SetInsertPoint(ctx.currentBlock); // 确保插入点正确
+
+        if (auto* funcDefStmt = dynamic_cast<Func*>(stmt.get())) {
+            auto* oldInsertPoint = ctx.builder.GetInsertBlock();
+            last = funcDefStmt->codeGen(ctx);
+            ctx.builder.SetInsertPoint(oldInsertPoint); // 恢复现场
+        } else {
+            last = stmt->codeGen(ctx);
+        }
+
+        // 更新 currentBlock（避免插入到死块）
+        ctx.currentBlock = ctx.builder.GetInsertBlock();
     }
+
     return last;
 }
 
@@ -219,9 +233,9 @@ void DeclareStmt::print(int indent) const
     }
 }
 
-llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const  
 {
-    llvm::Type* intType = llvm::Type::getInt32Ty(context);
+    llvm::Type* intType = llvm::Type::getInt32Ty(ctx.context);
     llvm::AllocaInst* alloca = nullptr;
 
     const std::string& ident_name = name->ident;
@@ -229,11 +243,11 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
 
     if (typeInfo.kind == SymbolKind::Int) {
         // 普通整形的分配
-        alloca = builder.CreateAlloca(intType, nullptr, ident_name);
+        alloca = ctx.builder.CreateAlloca(intType, nullptr, ident_name);
         // 赋初值0 
         if (!expr) {
             llvm::Value* zeroInit = llvm::ConstantInt::get(intType, 0);
-            builder.CreateStore(zeroInit, alloca);
+            ctx.builder.CreateStore(zeroInit, alloca);
         }
     } else if (typeInfo.kind == SymbolKind::Array) {
         // 多维数组的分配
@@ -241,29 +255,29 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
         for (auto it{ typeInfo.dims.rbegin() }; it != typeInfo.dims.rend(); it++) {
             arrayType = llvm::ArrayType::get(arrayType, *it);
         }
-        alloca = builder.CreateAlloca(arrayType, nullptr, ident_name);
+        alloca = ctx.builder.CreateAlloca(arrayType, nullptr, ident_name);
 
         // 类型参数列表：i8* 和 i64
         auto memsetFn = llvm::Intrinsic::getOrInsertDeclaration(
-            &module,
+            &ctx.module,
             llvm::Intrinsic::memset,
             {
-                llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
-                llvm::Type::getInt64Ty(context)
+                llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+                llvm::Type::getInt64Ty(ctx.context)
             }
         );
 
         // 构造参数
-        llvm::Value* zeroVal = llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0);
+        llvm::Value* zeroVal = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx.context), 0);
         llvm::Value* sizeVal = llvm::ConstantInt::get(
-            llvm::Type::getInt64Ty(context),
-            module.getDataLayout().getTypeAllocSize(arrayType)
+            llvm::Type::getInt64Ty(ctx.context),
+            ctx.module.getDataLayout().getTypeAllocSize(arrayType)
         );
-        llvm::Value* isVolatile = llvm::ConstantInt::getFalse(context);
+        llvm::Value* isVolatile = llvm::ConstantInt::getFalse(ctx.context);
 
         // 调用 memset
-        builder.CreateCall(memsetFn, {
-            builder.CreateBitCast(alloca, llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0)),
+        ctx.builder.CreateCall(memsetFn, {
+            ctx.builder.CreateBitCast(alloca, llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0)),
             zeroVal,
             sizeVal,
             isVolatile
@@ -281,11 +295,11 @@ llvm::Value* DeclareStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext&
 
     // 存在赋值
     if (expr) {
-        llvm::Value* initVal = expr->codeGen(builder, context, module);
+        llvm::Value* initVal = expr->codeGen(ctx);
         if (initVal) {
             // 普通变量直接存入
             if (typeInfo.kind == SymbolKind::Int) {
-                builder.CreateStore(initVal, alloca);
+                ctx.builder.CreateStore(initVal, alloca);
             }
         }
     }
@@ -303,9 +317,9 @@ void AssignStmt::print(int indent) const
     expr->print(indent + 2);
 }
 
-llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const  
 {
-    llvm::Value* rhs = expr->codeGen(builder, context, module);
+    llvm::Value* rhs = expr->codeGen(ctx);
     if (!rhs) {
         reportError("赋值右侧表达式生成失败");
         return nullptr;
@@ -322,7 +336,7 @@ llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
         }
         lhsAddr = symbol->addr;
     } else if (auto arrayExpr = dynamic_cast<ArraySubscriptExpr*>(name.get())) {
-        lhsAddr = arrayExpr->getAddress(builder, context, module);
+        lhsAddr = arrayExpr->getAddress(ctx);
         if (!lhsAddr) {
             reportError("获取数组元素地址失败");
             return nullptr;
@@ -335,7 +349,7 @@ llvm::Value* AssignStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
     if (!lhsAddr) {
 
     }
-    builder.CreateStore(rhs, lhsAddr);
+    ctx.builder.CreateStore(rhs, lhsAddr);
     return rhs;
 }
 
@@ -355,50 +369,53 @@ void IfStmt::print(int indent) const
     }
 }
 
-llvm::Value* IfStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* IfStmt::codeGen(CodeGenContext& ctx) const  
 {
-    llvm::Function* function = builder.GetInsertBlock()->getParent();
+    llvm::Function* function = ctx.builder.GetInsertBlock()->getParent();
 
-    llvm::Value* condValue = condition->codeGen(builder, context, module);
+    llvm::Value* condValue = condition->codeGen(ctx);
     if (!condValue) {
         reportError("if条件表达式生成失败");
         return nullptr;
     }
 
-    // 创建基本块
-    llvm::BasicBlock* ifBody = llvm::BasicBlock::Create(context, "if.then", function);
-    llvm::BasicBlock* elseBody = else_body ? llvm::BasicBlock::Create(context, "if.else") : nullptr;
-    llvm::BasicBlock* merge = llvm::BasicBlock::Create(context, "if.end");
+    // 创建块
+    llvm::BasicBlock* ifBody = llvm::BasicBlock::Create(ctx.context, "if.then", function);
+    llvm::BasicBlock* elseBody = else_body ? llvm::BasicBlock::Create(ctx.context, "if.else", function) : nullptr;
+    llvm::BasicBlock* merge = llvm::BasicBlock::Create(ctx.context, "if.end", function);
 
-    // 创建条件跳转
+    // 条件跳转
     if (elseBody) {
-        builder.CreateCondBr(condValue, ifBody, elseBody);
+        ctx.builder.CreateCondBr(condValue, ifBody, elseBody);
     } else {
-        builder.CreateCondBr(condValue, ifBody, merge);
+        ctx.builder.CreateCondBr(condValue, ifBody, merge);
     }
 
     // if-body
-    builder.SetInsertPoint(ifBody);
-    if (if_body) {
-        if_body->codeGen(builder, context, module);
-    }
-    if (!ifBody->getTerminator()) {
-        builder.CreateBr(merge);
+    ctx.builder.SetInsertPoint(ifBody);
+    ctx.currentBlock = ifBody;
+    if_body->codeGen(ctx);
+
+    if (!ctx.currentBlock->getTerminator()) {
+        ctx.builder.SetInsertPoint(ctx.currentBlock);
+        ctx.builder.CreateBr(merge);
     }
 
     // else-body
     if (elseBody) {
-        function->insert(function->end(), elseBody);
-        builder.SetInsertPoint(elseBody);
-        else_body->codeGen(builder, context, module);
-        if (!elseBody->getTerminator()) {
-            builder.CreateBr(merge);
+        ctx.builder.SetInsertPoint(elseBody);
+        ctx.currentBlock = elseBody;
+        else_body->codeGen(ctx);
+
+        if (!ctx.currentBlock->getTerminator()) {
+            ctx.builder.SetInsertPoint(ctx.currentBlock);
+            ctx.builder.CreateBr(merge);
         }
     }
 
-    // merge block
-    function->insert(function->end(), merge);
-    builder.SetInsertPoint(merge);
+    // 合并块
+    ctx.builder.SetInsertPoint(merge);
+    ctx.currentBlock = merge;
 
     return nullptr;
 }
@@ -415,41 +432,47 @@ void WhileStmt::print(int indent) const
     loop_body->print(indent + 2);
 }
 
-llvm::Value* WhileStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
+llvm::Value* WhileStmt::codeGen(CodeGenContext& ctx) const 
 {
-    llvm::Function* function = builder.GetInsertBlock()->getParent();
+    llvm::Function* function = ctx.builder.GetInsertBlock()->getParent();
 
-    llvm::BasicBlock* condBlock = llvm::BasicBlock::Create(context, "while.cond", function);
-    llvm::BasicBlock* bodyBlock = llvm::BasicBlock::Create(context, "while.body", function);
-    llvm::BasicBlock* afterBlock = llvm::BasicBlock::Create(context, "while.after", function);
+    // 创建基本块
+    llvm::BasicBlock* condBlock = llvm::BasicBlock::Create(ctx.context, "while.cond", function);
+    llvm::BasicBlock* bodyBlock = llvm::BasicBlock::Create(ctx.context, "while.body", function);
+    llvm::BasicBlock* afterBlock = llvm::BasicBlock::Create(ctx.context, "while.after", function);
 
-    // 跳转到条件判断
-    builder.CreateBr(condBlock);
+    // 创建跳转到 condBlock，连上 while 结构
+    ctx.builder.CreateBr(condBlock);
 
-    // 条件判断块
-    builder.SetInsertPoint(condBlock);
-    llvm::Value* condValue = condition->codeGen(builder, context, module);
+    // condBlock
+    ctx.builder.SetInsertPoint(condBlock);     // 设置插入点
+    ctx.currentBlock = condBlock;
+
+    llvm::Value* condValue = condition->codeGen(ctx);
     if (!condValue) return nullptr;
 
     if (!condValue->getType()->isIntegerTy(1)) {
-        condValue = builder.CreateICmpNE(condValue, llvm::ConstantInt::get(condValue->getType(), 0), "whilecond");
+        condValue = ctx.builder.CreateICmpNE(condValue, llvm::ConstantInt::get(condValue->getType(), 0), "whilecond");
     }
 
-    builder.CreateCondBr(condValue, bodyBlock, afterBlock);
+    ctx.builder.CreateCondBr(condValue, bodyBlock, afterBlock);
 
-    // 循环体块
-    builder.SetInsertPoint(bodyBlock);
-    loop_body->codeGen(builder, context, module);
+    // bodyBlock
+    ctx.builder.SetInsertPoint(bodyBlock);
+    ctx.currentBlock = bodyBlock;
 
-    // 如果body里没有终结指令，就跳回条件块
-    if (!builder.GetInsertBlock()->getTerminator()) {
-        builder.CreateBr(condBlock);
+    loop_body->codeGen(ctx);
+
+    if (!ctx.currentBlock->getTerminator()) {
+        ctx.builder.SetInsertPoint(ctx.currentBlock);
+        ctx.builder.CreateBr(condBlock);
     }
 
-    // while结束块
-    builder.SetInsertPoint(afterBlock);
+    // 必须插入 afterBlock，不然后续的代码可能跳不到这里
+    ctx.builder.SetInsertPoint(afterBlock);
+    ctx.currentBlock = afterBlock;
 
-    return afterBlock;
+    return nullptr;
 }
 
 // 函数调用语句节点
@@ -465,7 +488,7 @@ void FuncCallStmt::print(int indent) const
     }
 }
 
-llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const  
 {
     const std::string& funcName = name->ident;
 
@@ -475,18 +498,18 @@ llvm::Value* FuncCallStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
         return nullptr;
     }
     std::string funcLLVMName = funcSymbol->llvmName;
-    llvm::Function* calleeFunc = module.getFunction(funcLLVMName);
+    llvm::Function* calleeFunc = ctx.module.getFunction(funcLLVMName);
 
     std::vector<llvm::Value*> argsV;
     if (args) {
         for (const auto& argExpr: args->args) {
-            llvm::Value* argVal = argExpr->codeGen(builder, context, module);
+            llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
             argsV.push_back(argVal);
         }
     }
 
-    builder.CreateCall(calleeFunc, argsV);
+    ctx.builder.CreateCall(calleeFunc, argsV);
     return nullptr; // 作为语句，不返回值 
 }
 
@@ -505,19 +528,19 @@ void InputStmt::print(int indent) const
     }
 }
 
-llvm::Value* InputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const  
 {
-    llvm::Function* scanfFunc = module.getFunction("scanf");
+    llvm::Function* scanfFunc = ctx.module.getFunction("scanf");
     if (!scanfFunc) {
         llvm::FunctionType* scanfType = llvm::FunctionType::get(
-            llvm::IntegerType::getInt32Ty(context),
-            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            llvm::IntegerType::getInt32Ty(ctx.context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
             true
         );
-        scanfFunc = llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", module);
+        scanfFunc = llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", ctx.module);
     }
 
-    llvm::Value* formatStr = builder.CreateGlobalString("%d");
+    llvm::Value* formatStr = ctx.builder.CreateGlobalString("%d");
 
     for (auto& ident: idents) {
         assert(scope && "InputStmt::codeGen 中的 scope 为空");
@@ -540,12 +563,12 @@ llvm::Value* InputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
             }
             addr = symbol->addr;
         } else if (auto* arraySubscriptExpr = dynamic_cast<ArraySubscriptExpr*>(ident.get())) {
-            addr = arraySubscriptExpr->getAddress(builder, context, module);
+            addr = arraySubscriptExpr->getAddress(ctx);
             if (!addr) {
                 reportError("数组下标访问异常");
             }
         }
-        builder.CreateCall(scanfFunc, { formatStr, addr });
+        ctx.builder.CreateCall(scanfFunc, { formatStr, addr });
     }
     return nullptr;
 }
@@ -565,20 +588,20 @@ void OutputStmt::print(int indent) const
     }
 }
 
-llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
+llvm::Value* OutputStmt::codeGen(CodeGenContext& ctx) const {
     // 获取或声明 printf 函数
-    llvm::Function* printfFunc = module.getFunction("printf");
+    llvm::Function* printfFunc = ctx.module.getFunction("printf");
     if (!printfFunc) {
         llvm::FunctionType* printfType = llvm::FunctionType::get(
-            llvm::IntegerType::getInt32Ty(context),
-            llvm::PointerType::get(llvm::Type::getInt8Ty(context), 0),
+            llvm::IntegerType::getInt32Ty(ctx.context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
             true // 可变参数
         );
         printfFunc = llvm::Function::Create(
             printfType,
             llvm::Function::ExternalLinkage,
             "printf",
-            module
+            ctx.module
         );
     }
 
@@ -587,7 +610,7 @@ llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
     std::vector<llvm::Value*> printfArgs;
 
     for (const auto& expr : idents) {
-        llvm::Value* val = expr->codeGen(builder, context, module);
+        llvm::Value* val = expr->codeGen(ctx);
         if (val) {
             if (!formatStr.empty()) {
                 formatStr += " "; // 多个数之间空格分隔
@@ -599,9 +622,9 @@ llvm::Value* OutputStmt::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
 
     if (!formatStr.empty()) {
         formatStr += "\n"; // 行末换行
-        llvm::Value* formatStrVal = builder.CreateGlobalString(formatStr);
+        llvm::Value* formatStrVal = ctx.builder.CreateGlobalString(formatStr);
         printfArgs.insert(printfArgs.begin(), formatStrVal); // 格式串是第一个参数
-        builder.CreateCall(printfFunc, printfArgs);
+        ctx.builder.CreateCall(printfFunc, printfArgs);
     }
 
     return nullptr;
@@ -620,10 +643,10 @@ void BoolExpr::print(int indent) const
     rhs->print(indent + 2);
 }
 
-llvm::Value* BoolExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const  
 {
-    llvm::Value* lhsVal = lhs->codeGen(builder, context, module);
-    llvm::Value* rhsVal = rhs->codeGen(builder, context, module);
+    llvm::Value* lhsVal = lhs->codeGen(ctx);
+    llvm::Value* rhsVal = rhs->codeGen(ctx);
 
     if (!lhsVal || !rhsVal) {
         reportError("布尔表达式左右子表达式生成失败");
@@ -632,17 +655,17 @@ llvm::Value* BoolExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& co
 
     if (lhsVal->getType()->isIntegerTy() && rhsVal->getType()->isIntegerTy()) {
         if (symbol == "==") {
-            return builder.CreateICmpEQ(lhsVal, rhsVal, "cmpeq");
+            return ctx.builder.CreateICmpEQ(lhsVal, rhsVal, "cmpeq");
         } else if (symbol == "!=") {
-            return builder.CreateICmpNE(lhsVal, rhsVal, "cmpne");
+            return ctx.builder.CreateICmpNE(lhsVal, rhsVal, "cmpne");
         } else if (symbol == "<") {
-            return builder.CreateICmpSLT(lhsVal, rhsVal, "cmplt");
+            return ctx.builder.CreateICmpSLT(lhsVal, rhsVal, "cmplt");
         } else if (symbol == "<=") {
-            return builder.CreateICmpSLE(lhsVal, rhsVal, "cmple");
+            return ctx.builder.CreateICmpSLE(lhsVal, rhsVal, "cmple");
         } else if (symbol == ">") {
-            return builder.CreateICmpSGT(lhsVal, rhsVal, "cmpgt");
+            return ctx.builder.CreateICmpSGT(lhsVal, rhsVal, "cmpgt");
         } else if (symbol == ">=") {
-            return builder.CreateICmpSGE(lhsVal, rhsVal, "cmpge");
+            return ctx.builder.CreateICmpSGE(lhsVal, rhsVal, "cmpge");
         } else {
             reportError("不支持的布尔操作符");
             return nullptr;
@@ -661,9 +684,9 @@ void NumberExpr::print(int indent) const
     std::cout << std::string(indent, ' ') << "Number(" << value << ")" << std::endl;
 }
 
-llvm::Value* NumberExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
+llvm::Value* NumberExpr::codeGen(CodeGenContext& ctx) const 
 {
-    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), value);
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), value);
 }
 
 // 一元运算符节点
@@ -675,14 +698,14 @@ void UnaryExpr::print(int indent) const
     rhs->print(indent+2);
 }
 
-llvm::Value* UnaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
+llvm::Value* UnaryExpr::codeGen(CodeGenContext& ctx) const 
 {
-    llvm::Value* RHS = rhs->codeGen(builder, context, module);
+    llvm::Value* RHS = rhs->codeGen(ctx);
     switch (op) {
     case '+':
         return RHS;
     case '-':
-        return builder.CreateNeg(RHS);
+        return ctx.builder.CreateNeg(RHS);
     default:
         return nullptr;
     }
@@ -699,10 +722,10 @@ void BinaryExpr::print(int indent) const
     rhs->print(indent + 2);
 }
 
-llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
+llvm::Value* BinaryExpr::codeGen(CodeGenContext& ctx) const 
 {
-    llvm::Value* LHS = lhs->codeGen(builder, context, module);
-    llvm::Value* RHS = rhs->codeGen(builder, context, module);
+    llvm::Value* LHS = lhs->codeGen(ctx);
+    llvm::Value* RHS = rhs->codeGen(ctx);
     if (!LHS || !RHS) {
         reportError("二元运算的子表达式生成失败");
         return nullptr;
@@ -715,15 +738,15 @@ llvm::Value* BinaryExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& 
 
     switch (op) {
     case '+':
-        return builder.CreateAdd(LHS, RHS, "addtmp");
+        return ctx.builder.CreateAdd(LHS, RHS, "addtmp");
     case '-':
-        return builder.CreateSub(LHS, RHS, "subtmp");
+        return ctx.builder.CreateSub(LHS, RHS, "subtmp");
     case '*':
-        return builder.CreateMul(LHS, RHS, "multmp");
+        return ctx.builder.CreateMul(LHS, RHS, "multmp");
     case '/':
-        return builder.CreateSDiv(LHS, RHS, "divtmp");
+        return ctx.builder.CreateSDiv(LHS, RHS, "divtmp");
     case '%':
-        return builder.CreateSRem(LHS, RHS, "modtmp");
+        return ctx.builder.CreateSRem(LHS, RHS, "modtmp");
     default:
         reportError("不支持的二元运算符: " + std::string(1, op));
         return nullptr;
@@ -743,7 +766,7 @@ void ArraySubscriptExpr::print(int indent) const
     std::cout << std::string(indent, ' ') << "])" << std::endl;
 }
 
-llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
+llvm::Value* ArraySubscriptExpr::codeGen(CodeGenContext& ctx) const {
     SymbolInfo* symbol = scope->lookup(array->ident);
     if (!symbol) {
         reportError("数组: " + array->ident + " 未声明");
@@ -754,14 +777,14 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
     llvm::Value* arrayPtr = nullptr;
 
     // 构造数组的完整类型：[d1 x [d2 x ... [dn x i32]]]
-    llvm::Type* elementType = llvm::Type::getInt32Ty(context);
+    llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
     for (int i = symbol->dimensions.size() - 1; i >= 0; --i) {
         elementType = llvm::ArrayType::get(elementType, symbol->dimensions[i]);
     }
 
     if (symbol->isFuncParam) {
         // 函数参数情况，形如：alloca ptr -> store ptr to array
-        arrayPtr = builder.CreateLoad(llvm::PointerType::get(elementType, 0), arrayAlloca, array->ident + "_loaded");
+        arrayPtr = ctx.builder.CreateLoad(llvm::PointerType::get(elementType, 0), arrayAlloca, array->ident + "_loaded");
     } else {
         // 本地变量（alloca 的就是数组）
         arrayPtr = arrayAlloca;
@@ -774,9 +797,9 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
 
     // 计算下标
     std::vector<llvm::Value*> indices;
-    indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+    indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));
     for (auto& expr: subscript) {
-        llvm::Value* index = expr->codeGen(builder, context, module);
+        llvm::Value* index = expr->codeGen(ctx);
         if (index) {
             indices.push_back(index);
         }
@@ -787,17 +810,17 @@ llvm::Value* ArraySubscriptExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMC
         return nullptr;
     }
 
-    llvm::Value* gep = builder.CreateGEP(
+    llvm::Value* gep = ctx.builder.CreateGEP(
         elementType,
         arrayPtr,
         indices,
         "array_elem"
     );
 
-    return builder.CreateLoad(llvm::Type::getInt32Ty(context), gep, "load_elem");
+    return ctx.builder.CreateLoad(llvm::Type::getInt32Ty(ctx.context), gep, "load_elem");
 }
 
-llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const {
+llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
     SymbolInfo* symbol = scope->lookup(array->ident);
     if (!symbol) {
         reportError("数组: " + array->ident + " 未声明");
@@ -808,13 +831,13 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
     llvm::Value* arrayPtr = nullptr;
 
     // 构造完整数组类型
-    llvm::Type* elementType = llvm::Type::getInt32Ty(context);
+    llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
     for (int i = symbol->dimensions.size() - 1; i >= 0; --i) {
         elementType = llvm::ArrayType::get(elementType, symbol->dimensions[i]);
     }
 
     if (symbol->isFuncParam) {
-        arrayPtr = builder.CreateLoad(llvm::PointerType::get(elementType, 0), arrayAlloca, array->ident + "_loaded");
+        arrayPtr = ctx.builder.CreateLoad(llvm::PointerType::get(elementType, 0), arrayAlloca, array->ident + "_loaded");
     } else {
         arrayPtr = arrayAlloca;
     }
@@ -826,9 +849,9 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
 
     // 构造 GEP 索引
     std::vector<llvm::Value*> indices;
-    indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+    indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));
     for (const auto& expr : subscript) {
-        llvm::Value* idxVal = expr->codeGen(builder, context, module);
+        llvm::Value* idxVal = expr->codeGen(ctx);
         if (!idxVal) {
             reportError("存在无法作为下标的符号");
             return nullptr;  // 错误处理
@@ -836,7 +859,7 @@ llvm::Value* ArraySubscriptExpr::getAddress(llvm::IRBuilder<>& builder, llvm::LL
         indices.push_back(idxVal);
     }
 
-    llvm::Value* gep = builder.CreateGEP(
+    llvm::Value* gep = ctx.builder.CreateGEP(
         elementType,
         arrayPtr,
         indices,
@@ -874,7 +897,7 @@ void IdentExpr::print(int indent) const
     }
 }
 
-llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
+llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const 
 {
     SymbolInfo* symbol = scope->lookup(ident);
 
@@ -885,8 +908,8 @@ llvm::Value* IdentExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& c
 
     // 如果为变量
     if (symbol->kind == SymbolKind::Int) {
-        llvm::Type* valueType = llvm::Type::getInt32Ty(context);
-        return builder.CreateLoad(valueType, symbol->addr, ident);
+        llvm::Type* valueType = llvm::Type::getInt32Ty(ctx.context);
+        return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
     }
@@ -911,7 +934,7 @@ void FuncCallExpr::print(int indent) const
     }
 }
 
-llvm::Value* FuncCallExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const  
+llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const  
 {
     const std::string& funcName = name->ident;
 
@@ -921,18 +944,18 @@ llvm::Value* FuncCallExpr::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext
         return nullptr;
     }
     std::string funcLLVMName = funcSymbol->llvmName;
-    llvm::Function* calleeFunc = module.getFunction(funcLLVMName);
+    llvm::Function* calleeFunc = ctx.module.getFunction(funcLLVMName);
 
     std::vector<llvm::Value*> argsV;
     if (args) {
         for (const auto& argExpr: args->args) {
-            llvm::Value* argVal = argExpr->codeGen(builder, context, module);
+            llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
             argsV.push_back(argVal);
         }
     }
 
-    return builder.CreateCall(calleeFunc, argsV, funcName + "_call");
+    return ctx.builder.CreateCall(calleeFunc, argsV, funcName + "_call");
 }
 
 // 参数列表节点
@@ -947,7 +970,7 @@ void ArgList::print(int indent) const
     }
 }
 
-llvm::Value* ArgList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
+llvm::Value* ArgList::codeGen(CodeGenContext& ctx) const 
 {
     return nullptr;
 }
@@ -964,7 +987,7 @@ void ParamList::print(int indent) const
     }
 }
 
-llvm::Value* ParamList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const 
+llvm::Value* ParamList::codeGen(CodeGenContext& ctx) const 
 {
     return nullptr;
 }
@@ -981,7 +1004,7 @@ void InputArgList::print(int indent) const
     }
 }
 
-llvm::Value* InputArgList::codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const
+llvm::Value* InputArgList::codeGen(CodeGenContext& ctx) const
 {
     return nullptr;
 }

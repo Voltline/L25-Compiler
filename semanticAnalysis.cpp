@@ -56,18 +56,6 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
         }
     }
     for (const auto& stmt: func.stmts->stmts) {
-        // 基于RTTI检查这条stmt是否有可能是函数定义，如果是函数定义要扩展符号表
-        if (auto funcDefStmt = dynamic_cast<const Func*>(stmt.get())) {
-            const std::string& funcName = funcDefStmt->name->ident;
-
-            if (checkSameScopeSymbolExists(funcName)) {
-                reportError(*stmt, "函数 " + funcName + " 重定义");
-                continue;
-            }
-
-            SymbolInfo funcInfo{ funcName, *funcDefStmt };
-            declareSymbol(funcName, funcInfo);
-        }
         analyzeStmt(*stmt);
     }
     analyzeExpr(*func.return_value);

@@ -44,6 +44,21 @@ struct TypeInfo
     TypeInfo(SymbolKind kind, std::vector<int> dims);
 };
 
+struct CodeGenContext 
+{
+    llvm::LLVMContext& context;
+    llvm::Module& module;
+    llvm::IRBuilder<>& builder;
+    llvm::Function* currentFunction;
+    llvm::BasicBlock* currentBlock = nullptr;
+
+    // 构造函数简化传参
+    CodeGenContext(llvm::LLVMContext& ctx,
+                   llvm::Module& mod,
+                   llvm::IRBuilder<>& b)
+        : context(ctx), module(mod), builder(b) {}
+};
+
 // AST节点基类
 struct ASTNode
 {
@@ -51,7 +66,7 @@ struct ASTNode
 
     virtual void print(int indent = 0) const = 0;
     // 必须实现codeGen
-    virtual llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const = 0;
+    virtual llvm::Value* codeGen(CodeGenContext& ctx) const = 0;
 
     // 当前节点对应的作用域树节点
     Scope* scope; 
@@ -72,7 +87,7 @@ struct Program: public ASTNode
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 语句节点
@@ -91,7 +106,7 @@ struct Func: public Stmt
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 语句列表节点
@@ -103,7 +118,7 @@ struct StmtList: public ASTNode
     
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override ;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override ;
 };
 
 // 声明语句节点
@@ -116,7 +131,7 @@ struct DeclareStmt: public Stmt
     
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 赋值语句节点
@@ -129,7 +144,7 @@ struct AssignStmt: public Stmt
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 条件分支语句节点
@@ -144,7 +159,7 @@ struct IfStmt: public Stmt {
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // While循环语句节点
@@ -158,7 +173,7 @@ struct WhileStmt: public Stmt
     
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 函数调用语句节点
@@ -171,7 +186,7 @@ struct FuncCallStmt: public Stmt
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 输入语句节点
@@ -185,7 +200,7 @@ struct InputStmt: public Stmt
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 输出语句节点
@@ -199,7 +214,7 @@ struct OutputStmt: public Stmt
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 表达式节点
@@ -216,7 +231,7 @@ struct BoolExpr: public ASTNode
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 整数常量节点
@@ -226,7 +241,7 @@ struct NumberExpr: public Expr
     NumberExpr(int val);
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 一元运算符节点
@@ -237,7 +252,7 @@ struct UnaryExpr: public Expr
     UnaryExpr(char op, std::unique_ptr<Expr> rhs);
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 二元运算符节点
@@ -249,7 +264,7 @@ struct BinaryExpr: public Expr
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 数组下标访问运算节点
@@ -261,8 +276,8 @@ struct ArraySubscriptExpr: public Expr
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
-    llvm::Value* getAddress(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+    llvm::Value* getAddress(CodeGenContext& ctx) const;
 };
 
 // 标识符节点
@@ -274,7 +289,7 @@ struct IdentExpr: public Expr
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 
     friend std::ostream& operator<<(std::ostream& os, const IdentExpr& ident) {
         os << ident.ident;
@@ -294,7 +309,7 @@ struct FuncCallExpr: public Expr
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
  
 // 参数列表节点
@@ -306,7 +321,7 @@ struct ArgList: public ASTNode
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 形式参数列表节点
@@ -318,7 +333,7 @@ struct ParamList: public ASTNode
     
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 输入函数参数列表节点
@@ -335,7 +350,7 @@ struct InputArgList: public ASTNode
 
     void print(int indent = 0) const override;
 
-    llvm::Value* codeGen(llvm::IRBuilder<>& builder, llvm::LLVMContext& context, llvm::Module& module) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 extern Program* rootProgram;

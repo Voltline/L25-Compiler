@@ -107,8 +107,9 @@ int main(int argc, const char* argv[])
     llvm::Module module(std::filesystem::path(inputFile).filename().string(), context);
     // 修改Triple信息以适应平台
     module.setTargetTriple(llvm::sys::getDefaultTargetTriple());
+    CodeGenContext ctx{ context, module, builder };
 
-    llvm::Value* val = rootProgram->codeGen(builder, context, module);
+    llvm::Value* val = rootProgram->codeGen(ctx);
     if (!val || hasError) {
         std::cerr << "IR生成失败，停止\n";
         return 1;
