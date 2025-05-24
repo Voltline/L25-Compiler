@@ -10,15 +10,15 @@
 ![Stars](https://img.shields.io/github/stars/Voltline/L25-Compiler)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Voltline/L25-Compiler)
 
-* L25 Language is founded by ECNU Compiler Principle Course Team.
-* The compiler uses L25 grammar with Flex, Bison and LLVM.
-* The compiler is open-source based on MIT License.
+* ✨ L25 Language is founded by ECNU Compiler Principle Course Team. 
+* ⚙️ The compiler uses L25 grammar with Flex, Bison and LLVM.
+* 🆓 The compiler is open-source based on MIT License.
 
-## Language Features & Examples
-> A series of extensions to the original L25 grammar have now been implemented.
+## 🌟Language Features & Examples
+> 🚧 A series of extensions to the original L25 grammar have now been implemented.
 
-### Features
-* *Nested Functions within Functions(without Closure)*:
+### ✨Features
+* 🔁 *Nested Functions within Functions(without Closure)*:
 ```L25
 func f1(a) {
     func f2(b) {
@@ -29,9 +29,9 @@ func f1(a) {
     return d;
 }
 ```
-&emsp; Although nested functions are allowed, inner functions **cannot access symbols in the outer scope**.
+&emsp; 💡 Although nested functions are allowed, inner functions **cannot access symbols in the outer scope**.
 
-* *Definition and Invocation of Multidimensional Arrays*:
+* 🧮 *Definition and Invocation of Multidimensional Arrays*:
 ```L25
 ... 
 main {
@@ -40,7 +40,7 @@ main {
 }
 ```
 
-* *Postponed Type Declarations(Type Annotations Placed after Identifiers)*:
+* 🏷️ *Postponed Type Declarations(Type Annotations Placed after Identifiers)*:
 ```L25
 let a: int;
 let b: int = 10;
@@ -48,7 +48,7 @@ let c = 20;
 let d: [3, 4];
 ```
 
-* *Every statement-list has `at least one statement`*:
+* 🔐 *Every statement-list has `at least one statement`*:
 ```L25
 // ✅ Right Example
 func rightFunc(a, b)
@@ -64,7 +64,7 @@ func wrongFunc(a, b)
 }
 ```
 
-* *Every statement ends with `semicolon`*:
+* 🔚 *Every statement ends with `semicolon`*:
 ```L25
 func f(a, b) 
 {
@@ -78,8 +78,8 @@ func f(a, b)
 }
 ```
 
-### Examples
-* Fibonacci Calculate:
+### 🧪 Examples
+* 🌀 Fibonacci Calculate:
 ```L25
 program fibonacci {
     func fibs(n) {
@@ -104,7 +104,7 @@ program fibonacci {
 }
 ```
 
-* Multidimensional Array Operations:
+* 🧊 Multidimensional Array Operations:
 ```L25
 program arr {
     main {
@@ -123,7 +123,7 @@ program arr {
 }
 ```
 
-* Nested Function Call:
+* 🧬 Nested Function Call:
 ```L25
 program nestedFuncCall {
     func f(n) {
@@ -143,8 +143,25 @@ program nestedFuncCall {
 }
 ```
 
-## Grammar
-> Extended L25 Grammar with EBNF description
+## 🎨 Visual Studio Code Extensions
+
+> ✨ A syntax highlighting & code snippets extension for VSCode
+
+Though I don't have time to build a full-featured IDE for **L25**, I still made a **lightweight VSCode extension**: [L25-Syntax-Highlight](https://marketplace.visualstudio.com/items?itemName=Voltline.l25-syntax-highlight) 🎉
+
+It provides:
+- 🖍️ **Syntax highlighting**
+- ✂️ **Code snippets** for faster development
+
+The extension is also open-sourced on GitHub – feel free to check it out and give it a ⭐: [GitHub - L25-Syntax-Highlight](https://github.com/Voltline/L25-Syntax-Highlight) 🚀
+
+👇 Here's what it looks like in action:
+<center>
+<img src="others/extension-effect.png" width="50%">
+</center>
+
+## 📜 Grammar
+> 📐 Extended L25 Grammar with EBNF description
 ```
 <program> = "program" <ident> "{" <func_def_list> "main" "{" <stmt_list> "}" "}"
 
@@ -196,39 +213,39 @@ program nestedFuncCall {
 <digit> = "0" | "1" | ... | "9"
 ```
 
-## Build Instructions
-### Dependencies
+## 🛠️ Build Instructions
+### 🔗 Dependencies
 * LLVM (version >= 16)
 * Flex (version == 2.6.4)
 * Bison (version == 3.8.2)
 * Makefile
 * Clang (version >= 18.0, with C++20 support)
-### Build
+### ⚙️ Build
 * Just use `make` to compile the project, remember to configure your own llvm path in Makefile
 ```bash
 make
 ./l25cc --help
 ```
 
-## Usage
-> Compile and run `.l25` source files with flexible options.
+## 🚦 Usage
+> 📦 Compile and run `.l25` source files with flexible options.
 
-### Basic Usage
+### 🧾 Basic Usage
 ```bash
 ./l25cc <source.l25> [options]
 ```
-### Options
+### 📑 Options
 
-| Option           | Description                                      |
+| 🧩 Option           | 📖 Description                                      |
 |------------------|--------------------------------------------------|
-| `-emit-ast`      | Print the AST (Abstract Syntax Tree)             |
-| `-emit-scope`    | Print the scope tree after semantic analysis     |
-| `-emit-ir`       | Output LLVM IR (`.ll` file)                      |
-| `-emit-bc`       | Output LLVM Bitcode (`.bc` file)                 |
-| `-o <file>`      | Specify the output filename                      |
-| `-help`, `--help`| Show this help message                           |
+| `-emit-ast`      | 🌲 Print the AST (Abstract Syntax Tree)             |
+| `-emit-scope`    | 🔍 Print the scope tree after semantic analysis     |
+| `-emit-ir`       | ⚙️ Output LLVM IR (`.ll` file)                      |
+| `-emit-bc`       | 💾 Output LLVM Bitcode (`.bc` file)                 |
+| `-o <file>`      | 📤 Specify the output filename                      |
+| `-help`, `--help`| 🆘 Show this help message                           |
 
-### Smart Input File Detection
+### 🤖 Smart Input File Detection
 
 You don't have to specify the source file as the first argument.  
 The compiler will **automatically detect the first valid `.l25` file** among the inputs:
@@ -239,12 +256,12 @@ The compiler will **automatically detect the first valid `.l25` file** among the
 ./l25cc --help
 ```
 
-### Output Behavior
+### 🧨 Output Behavior
 
 - If `-emit-ir` or `-emit-bc` is specified (or output filename ends with `.ll` / `.bc`), the compiler will **generate LLVM files** accordingly.
 - If neither is specified, it will try to **produce an executable** (requires `clang` and `llvm-as` in `PATH`).
 
-## Project Structure
+## 🗂️ Project Structure
 ```
 L25-Compiler/
 ├── ast.cpp
@@ -258,6 +275,8 @@ L25-Compiler/
 ├── Makefile
 ├── others
 │   ├── banner.png
+│   ├── extension-effect.png
+│   ├── extension.png
 │   ├── logo-light.png
 │   └── logo.png
 ├── parser.y
@@ -267,6 +286,8 @@ L25-Compiler/
 └── test
     ├── test1.l25
     ├── test10.l25
+    ├── test11.l25
+    ├── test12.l25
     ├── test2.l25
     ├── test3.l25
     ├── test4.l25
@@ -276,3 +297,20 @@ L25-Compiler/
     ├── test8.l25
     └── test9.l25
 ```
+
+## 🧠 About LLVM  
+<center>
+<img src="https://avatars.githubusercontent.com/u/17149993?s=200&v=4" width="25%">
+</center>
+
+[LLVM](https://llvm.org/) is a powerful **modular compiler infrastructure** used to build modern language toolchains.  
+It provides:
+- 🛠️ **Intermediate Representation (IR)** for platform-independent optimizations
+- ⚙️ **Backend support** for multiple architectures
+- 🔧 Tooling like `clang`, `opt`, and `llc` for code analysis and transformation
+
+L25 leverages LLVM to generate and optimize low-level code efficiently 💡
+
+## 🧑‍💻 Contributions Welcome!
+Feel free to submit issues, pull requests, or just give us a ⭐ if you like the project!
+Happy coding! 💻✨
