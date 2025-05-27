@@ -1,0 +1,33 @@
+program Guess {
+    func random(seed){
+        let res = seed;
+        let a = (seed * seed) % 6759658;
+        let c = (8675 * seed) % 47655;
+        let m = (875976 * 786458) % seed;
+        let cnt = 0;
+        while (cnt < 1000) {
+            res = (a * res + c) % m; // a, c, m 为常数
+            cnt = cnt + 1;
+        };
+        return res;
+    }
+
+    main {
+        let seed = 0;
+        let max = 1000;
+        input(seed); //输入一个随机数种子
+        let num = random(seed) % max;
+        output(num);
+        let in = 0;
+        input(in);
+        while (in != num) {
+            if (in > num) {
+                output(1);
+            } else {
+                output(0);
+            };
+            input(in);
+        };
+        output(in, num);
+    }
+}
