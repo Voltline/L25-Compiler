@@ -101,6 +101,7 @@ struct Func: public Stmt
     std::unique_ptr<StmtList> stmts;
     std::unique_ptr<Expr> return_value;
     Scope* body_scope;
+    std::vector<SymbolInfo*> captures; // 闭包捕获列表
 
     Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value);
 

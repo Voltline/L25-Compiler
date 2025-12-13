@@ -1,4 +1,6 @@
 #include "include/semanticAnalysis.h"
+#include "include/errorReporter.h"
+#include <algorithm>
 extern bool hasError;
 
 /* SemanticAnalyzer 方法定义 */
@@ -48,6 +50,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
     func.scope = currentScope;
     enterScope();
     func.body_scope = currentScope;
+    funcStack.push_back(&func);
     if (func.params) {
         for (const auto& param: func.params->params) {
             // TODO: 这里可能有求值存入value的需求
@@ -59,6 +62,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
         analyzeStmt(*stmt);
     }
     analyzeExpr(*func.return_value);
+    funcStack.pop_back();
     exitScope();
 }
 
@@ -175,6 +179,20 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         if (!checkSymbolExists(ident->ident)) {
             reportError(*ident, "变量未声明：" + ident->ident);
         }
+
+        // 记录闭包捕获
+        if (!funcStack.empty()) {
+            Scope* declScope = findSymbolScope(ident->ident);
+            if (declScope && declScope != funcStack.back()->body_scope) {
+                SymbolInfo* capturedSymbol = currentScope->lookup(ident->ident);
+                if (capturedSymbol && capturedSymbol->kind != SymbolKind::Function && capturedSymbol->kind != SymbolKind::Program) {
+                    auto& captureList = funcStack.back()->captures;
+                    if (std::find(captureList.begin(), captureList.end(), capturedSymbol) == captureList.end()) {
+                        captureList.push_back(capturedSymbol);
+                    }
+                }
+            }
+        }
     } else if (auto binary = dynamic_cast<const BinaryExpr*>(&expr)) {
         analyzeExpr(*binary->lhs);
         analyzeExpr(*binary->rhs);
@@ -279,12 +297,19 @@ void SemanticAnalyzer::exitScope()
     currentScope = currentScope->getParent();
 }
 
-void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg) 
+Scope* SemanticAnalyzer::findSymbolScope(const std::string& name)
 {
-    std::cerr 
-      << "\033[1;31m[语法错误]\033[0m "
-      << "位于 \033[1;33m第 " << node.lineno 
-      << " 行, 第 " << node.column << " 列\033[0m: "
-      << msg << std::endl;
-      hasError = true;
+    Scope* scopeIter = currentScope;
+    while (scopeIter) {
+        if (scopeIter->lookupLocal(name)) {
+            return scopeIter;
+        }
+        scopeIter = scopeIter->getParent();
+    }
+    return nullptr;
+}
+
+void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg)
+{
+    reportErrorAt(node, "语义分析", msg);
 }
