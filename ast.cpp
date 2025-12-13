@@ -1,4 +1,5 @@
 #include "include/ast.h"
+#include "include/errorReporter.h"
 #include <llvm/IR/Type.h>
 #include <unordered_map>
 extern bool hasError;
@@ -14,12 +15,7 @@ TypeInfo::TypeInfo(SymbolKind kind, std::vector<int> dims)
 // ASTNode 方法
 void ASTNode::reportError(const std::string& msg) const
 {
-    std::cerr 
-        << "\033[1;31m[代码生成错误]\033[0m "
-        << "位于 \033[1;33m第 " << lineno 
-        << " 行, 第 " << column << " 列\033[0m: "
-        << msg << std::endl;
-    hasError = true;
+    reportErrorAt(*this, "代码生成", msg);
 }
 
 // 程序节点

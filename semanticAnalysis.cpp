@@ -1,4 +1,5 @@
 #include "include/semanticAnalysis.h"
+#include "include/errorReporter.h"
 #include <algorithm>
 extern bool hasError;
 
@@ -308,12 +309,7 @@ Scope* SemanticAnalyzer::findSymbolScope(const std::string& name)
     return nullptr;
 }
 
-void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg) 
+void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg)
 {
-    std::cerr 
-      << "\033[1;31m[语法错误]\033[0m "
-      << "位于 \033[1;33m第 " << node.lineno 
-      << " 行, 第 " << node.column << " 列\033[0m: "
-      << msg << std::endl;
-      hasError = true;
+    reportErrorAt(node, "语义分析", msg);
 }

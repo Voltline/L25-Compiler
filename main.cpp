@@ -14,6 +14,7 @@
 #include <llvm/Bitcode/BitcodeWriter.h>
 
 #include "include/ast.h"
+#include "include/errorReporter.h"
 #include "include/semanticAnalysis.h"
 #include "parser.tab.hpp"
 
@@ -21,6 +22,17 @@ extern int yyparse();
 extern FILE* yyin;  // Bison/Flex 使用的输入流
 Program* rootProgram = nullptr;
 bool hasError = false;
+
+std::string findCommand(const std::vector<std::string>& candidates)
+{
+    for (const auto& name: candidates) {
+        std::string check = "command -v " + name + " >/dev/null 2>&1";
+        if (std::system(check.c_str()) == 0) {
+            return name;
+        }
+    }
+    return {};
+}
 
 int main(int argc, const char* argv[]) 
 {
@@ -76,6 +88,10 @@ int main(int argc, const char* argv[])
     FILE* input = fopen(inputFile.c_str(), "r");
     if (!input) {
         std::cerr << "无法打开输入文件: " << inputFile << "\n";
+        return 1;
+    }
+    if (!loadSourceFile(inputFile)) {
+        fclose(input);
         return 1;
     }
     yyin = input;
@@ -144,7 +160,15 @@ int main(int argc, const char* argv[])
             out.flush();
         }
 
-        std::string cmd = "llvm-as " + llFile + " -o " + bcFile + " && clang " + bcFile + " -o " + outputFile;
+        std::string llvmAs = findCommand({"llvm-as", "llvm-as-18"});
+        std::string clangBin = findCommand({"clang", "clang-18"});
+
+        if (llvmAs.empty() || clangBin.empty()) {
+            std::cerr << "未找到可用的 llvm-as 或 clang，请确认已安装 LLVM 工具链\n";
+            return 1;
+        }
+
+        std::string cmd = llvmAs + " " + llFile + " -o " + bcFile + " && " + clangBin + " " + bcFile + " -o " + outputFile;
         int ret = system(cmd.c_str());
         if (ret != 0) {
             std::cerr << "链接失败: llvm-as 或 clang 报错\n";

@@ -1,0 +1,10 @@
+program errorWrongCallArity {
+    func add2(x: int, y: int) {
+        let tmp = 0;
+        return x + y;
+    }
+    main {
+        let val = add2(1);
+        output(val);
+    }
+}

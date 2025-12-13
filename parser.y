@@ -2,6 +2,7 @@
 %define parse.error verbose
 %{
 #include "include/ast.h"
+#include "include/errorReporter.h"
 #include "include/symbol.h"
 #include <memory>
 #include <cstdio>
@@ -15,14 +16,10 @@ extern char* yytext;
 extern bool hasError;
 
 int yylex();
-void yyerror(const char* s) 
+void yyerror(const char* s)
 {
-    fprintf(stderr,
-        "\033[1;31m[语法错误]\033[0m "
-        "位于 \033[1;33m第 %d 行, 第 %d 列\033[0m: %s "
-        "(near \033[1;34m'%s'\033[0m)\n",
-        yylineno, yycolumn, s, yytext);
-    hasError = true;
+    std::string msg = std::string{s} + " (near '" + yytext + "')";
+    reportErrorAt("语法分析", yylineno, yycolumn, msg);
 }
 extern Program* rootProgram;
 %}
