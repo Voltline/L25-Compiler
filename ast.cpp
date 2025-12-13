@@ -258,7 +258,7 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         alloca = ctx.builder.CreateAlloca(arrayType, nullptr, ident_name);
 
         // 类型参数列表：i8* 和 i64
-        auto memsetFn = llvm::Intrinsic::getOrInsertDeclaration(
+        auto memsetFn = llvm::Intrinsic::getDeclaration(
             &ctx.module,
             llvm::Intrinsic::memset,
             {
