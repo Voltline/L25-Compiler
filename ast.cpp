@@ -122,6 +122,21 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
             argTypes.push_back(llvm::Type::getInt32Ty(ctx.context));
         }
     }
+
+    // 隐式捕获参数（以指针方式传递）
+    for (auto* captured : captures) {
+        if (!captured) continue;
+        if (captured->kind == SymbolKind::Array) {
+            llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
+            llvm::Type* arrayType = elementType;
+            for (int i = captured->dimensions.size() - 1; i >= 0; i--) {
+                arrayType = llvm::ArrayType::get(arrayType, captured->dimensions[i]);
+            }
+            argTypes.push_back(llvm::PointerType::get(arrayType, 0));
+        } else {
+            argTypes.push_back(llvm::PointerType::get(llvm::Type::getInt32Ty(ctx.context), 0));
+        }
+    }
     
     if (!functionMap.contains(funcName)) {
         functionMap[funcName] = 1;
@@ -146,20 +161,36 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
     llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
     ctx.builder.SetInsertPoint(entry);
 
+    std::vector<std::pair<SymbolInfo*, llvm::Value*>> capturedOriginalAddrs;
+
     int idx = 0;
     for (auto& arg: function->args()) {
-        arg.setName(params->params[idx]->ident); // 设置形参名
-        SymbolInfo* argInfo = body_scope->lookupLocal(params->params[idx]->ident);
-        
-        if (argInfo->kind == SymbolKind::Array) {
-            // 数组：直接把传入的指针存储在 alloca 里
-            argInfo->addr = &arg;
+        if (params && idx < static_cast<int>(params->params.size())) {
+            arg.setName(params->params[idx]->ident); // 设置形参名
+            SymbolInfo* argInfo = body_scope->lookupLocal(params->params[idx]->ident);
+
+            if (argInfo->kind == SymbolKind::Array) {
+                // 数组：直接把传入的指针存储在 alloca 里
+                argInfo->addr = &arg;
+            } else {
+                llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
+                ctx.builder.CreateStore(&arg, alloca);
+                argInfo->addr = alloca;
+            }
+            argInfo->value = &arg;
         } else {
-            llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
-            ctx.builder.CreateStore(&arg, alloca);
-            argInfo->addr = alloca;
+            int captureIndex = idx - (params ? static_cast<int>(params->params.size()) : 0);
+            if (captureIndex >= 0 && captureIndex < static_cast<int>(captures.size())) {
+                SymbolInfo* capturedInfo = captures[captureIndex];
+                std::string captureName = capturedInfo ? capturedInfo->name + "_capture" : "capture";
+                arg.setName(captureName);
+                if (capturedInfo) {
+                    capturedOriginalAddrs.emplace_back(capturedInfo, capturedInfo->addr);
+                    capturedInfo->addr = &arg;
+                    capturedInfo->value = &arg;
+                }
+            }
         }
-        argInfo->value = &arg;
         idx++;
     }
 
@@ -175,6 +206,11 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
 
     llvm::Value* retVal = return_value->codeGen(ctx);
     ctx.builder.CreateRet(retVal);
+
+    // 生成完毕后恢复捕获符号的原始地址
+    for (auto& [symbol, originalAddr] : capturedOriginalAddrs) {
+        symbol->addr = originalAddr;
+    }
 
     return function;
 }
@@ -509,8 +545,20 @@ llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const
         }
     }
 
+    if (funcSymbol->funcDef) {
+        for (auto* captured : funcSymbol->funcDef->captures) {
+            if (!captured) continue;
+            SymbolInfo* callerSymbol = scope->lookup(captured->name);
+            if (!callerSymbol || !callerSymbol->addr) {
+                reportError("捕获变量: " + captured->name + " 在调用点不可用");
+                return nullptr;
+            }
+            argsV.push_back(callerSymbol->addr);
+        }
+    }
+
     ctx.builder.CreateCall(calleeFunc, argsV);
-    return nullptr; // 作为语句，不返回值 
+    return nullptr; // 作为语句，不返回值
 }
 
 // 输入语句节点
@@ -952,6 +1000,18 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
             llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
             argsV.push_back(argVal);
+        }
+    }
+
+    if (funcSymbol->funcDef) {
+        for (auto* captured : funcSymbol->funcDef->captures) {
+            if (!captured) continue;
+            SymbolInfo* callerSymbol = scope->lookup(captured->name);
+            if (!callerSymbol || !callerSymbol->addr) {
+                reportError("捕获变量: " + captured->name + " 在调用点不可用");
+                return nullptr;
+            }
+            argsV.push_back(callerSymbol->addr);
         }
     }
 

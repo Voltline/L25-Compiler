@@ -18,6 +18,7 @@ SymbolInfo::SymbolInfo(const std::string& name, const Func& func)
     : name(name)
 {
     kind = SymbolKind::Function;
+    funcDef = &func;
     if (func.params) {
         // 存储参数类型
         for (const auto& param: func.params->params) {
