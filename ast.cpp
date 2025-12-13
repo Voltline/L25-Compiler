@@ -226,6 +226,21 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
             argTypes.push_back(typeInfoToLLVMValueType(captureType, ctx.context));
         }
     }
+
+    // 隐式捕获参数（以指针方式传递）
+    for (auto* captured : captures) {
+        if (!captured) continue;
+        if (captured->kind == SymbolKind::Array) {
+            llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
+            llvm::Type* arrayType = elementType;
+            for (int i = captured->dimensions.size() - 1; i >= 0; i--) {
+                arrayType = llvm::ArrayType::get(arrayType, captured->dimensions[i]);
+            }
+            argTypes.push_back(llvm::PointerType::get(arrayType, 0));
+        } else {
+            argTypes.push_back(llvm::PointerType::get(llvm::Type::getInt32Ty(ctx.context), 0));
+        }
+    }
     
     if (!functionMap.contains(funcName)) {
         functionMap[funcName] = 1;
