@@ -66,7 +66,7 @@ func wrongFunc(a, b)
 
 * 🔚 *Every statement ends with `semicolon`*:
 ```L25
-func f(a, b) 
+func f(a, b)
 {
     let res;
     if (a > b) {
@@ -75,6 +75,24 @@ func f(a, b)
         res = b;
     }; // ⚠️ Remember to add semicolon
     return res;
+}
+```
+
+* 🧭 *Pointers and address operations*:
+```L25
+program ptr {
+    func inc(p) {
+        *p = *p + 1;
+        return 0;
+    }
+
+    main {
+        let x:int = 5;
+        let px: *int;
+        px = &x;     // take address
+        inc(px);     // pass pointer
+        output(*px); // dereference
+    }
 }
 ```
 
@@ -184,7 +202,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
                | "let" <ident> ":" "int" "=" <expr>     // Explicit int, with initial value
                | "let" <ident> ":" "[" <dim_list> "]"   // Explicit array, default 0 for every slot
 
-<assign_stmt> = (<ident> | <array_subscript_expr>) "=" <expr>
+<assign_stmt> = (<ident> | <array_subscript_expr> | "*" <factor>) "=" <expr>
 <if_stmt> = "if" "(" <bool_expr> ")" "{" <stmt_list> "}" [ "else" "{" <stmt_list> "}" ]
 <while_stmt> = "while" "(" <bool_expr> ")" "{" <stmt_list> "}"
 <func_call> = <ident> "(" [ <arg_list> ] ")"
@@ -197,13 +215,13 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 
 <expr> = [ "+" | "-" ] <term> { ("+" | "-") <term> }
 <term> = <factor> { ("*" | "/" | "%") <factor> }
-<factor> = <ident> | <number> | "(" <expr> ")" | <func_call> | <array_subscript_expr>
+<factor> = <ident> | <number> | "(" <expr> ")" | <func_call> | <array_subscript_expr> | "&" <factor> | "*" <factor>
 
 <array_subscript_expr> = <ident> "[" <array_subscript_list> "]"
 <array_subscript_list> = <expr> { "," <expr> }
 
 <dim_list> = <number> {"," <number> }
-<type_info> = "int" | "[" <dim_list> "]"
+<type_info> = "int" | "[" <dim_list> "]" | "*" <type_info>
 
 <input_arg_list> = ( <ident> | <array_subscript_expr> ) { "," ( <ident> | <array_subscript_expr> ) }
 

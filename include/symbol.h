@@ -14,23 +14,25 @@ struct TypeInfo;
 struct Func;
 
 enum class SymbolKind {
-    Int, Array, Function, Program, Invalid
+    Int, Array, Pointer, Function, Program, Invalid
 };
 
 const char* const SymbolName[] {
-    "Int", "Array", "Function", "Program", "Invalid" 
+    "Int", "Array", "Pointer", "Function", "Program", "Invalid"
 };
 
-struct SymbolInfo 
+struct SymbolInfo
 {
     SymbolKind kind;
     std::string name;                   // 对应ident节点的name
     std::vector<int> dimensions;        // 展平后的数组维度信息
     std::vector<TypeInfo> paramTypes;   // 函数参数类型信息
+    const Func* funcDef = nullptr;      // 函数定义指针（用于闭包捕获）
     llvm::Value* value = nullptr;       // LLVM变量或函数指针
     llvm::Value* addr = nullptr;        // LLVM变量栈地址
     bool isFuncParam = false;           // 是否为函数参数(影响数组访问)
     std::string llvmName = "";               // LLVM中的唯一名字
+    int pointerLevel = 0;               // 指针层级
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);
