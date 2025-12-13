@@ -39,9 +39,10 @@ struct TypeInfo
 {
     SymbolKind kind; // 默认不使用
     std::vector<int> dims; // 数组维度
+    int pointerLevel; // 指针层级
 
     TypeInfo();
-    TypeInfo(SymbolKind kind, std::vector<int> dims);
+    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0);
 };
 
 struct CodeGenContext 
@@ -254,6 +255,27 @@ struct UnaryExpr: public Expr
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 取地址表达式节点
+struct AddressOfExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    AddressOfExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 解引用表达式节点
+struct DereferenceExpr: public Expr
+{
+    std::unique_ptr<Expr> pointerExpr;
+    DereferenceExpr(std::unique_ptr<Expr> pointerExpr);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+    llvm::Value* getPointerValue(CodeGenContext& ctx) const;
 };
 
 // 二元运算符节点

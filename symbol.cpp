@@ -2,13 +2,14 @@
 #include "include/ast.h"
 
 /* SymbolInfo 方法定义 */
-SymbolInfo::SymbolInfo(SymbolKind kind, const std::string& name) 
+SymbolInfo::SymbolInfo(SymbolKind kind, const std::string& name)
     : kind(kind), name(name) {}
 
-SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type) 
+SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type)
     : name(name)
 {
     kind = type.kind;
+    pointerLevel = type.pointerLevel;
     if (kind == SymbolKind::Array) {
         dimensions = type.dims; // 保存维度信息
     }

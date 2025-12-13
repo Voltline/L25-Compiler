@@ -1,0 +1,23 @@
+program pointerDemo {
+    func inc(ptr: *int) {
+        *ptr = *ptr + 1;
+        return 0;
+    }
+
+    func swap(aPtr: *int, bPtr: *int) {
+        let tmp = *aPtr;
+        *aPtr = *bPtr;
+        *bPtr = tmp;
+        return 0;
+    }
+
+    main {
+        let a:int = 5;
+        let b:int = 8;
+        let p: *int;
+        p = &a;
+        inc(p);
+        swap(&a, &b);
+        output(a, b, *p);
+    }
+}

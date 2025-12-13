@@ -88,10 +88,13 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeExpr(*assign->expr);
         } else if (auto arrayAssign = dynamic_cast<ArraySubscriptExpr*>(assign->name.get())) {
             if (!checkSymbolExists(arrayAssign->array->ident)) {
-                reportError(*arrayAssign, "变量未声明：" + normalVarAssign->ident);
+                reportError(*arrayAssign, "变量未声明：" + arrayAssign->array->ident);
                 return;
             }
             analyzeExpr(*arrayAssign);
+            analyzeExpr(*assign->expr);
+        } else if (auto derefAssign = dynamic_cast<DereferenceExpr*>(assign->name.get())) {
+            analyzeExpr(*derefAssign);
             analyzeExpr(*assign->expr);
         }
     } else if (auto ifStmt = dynamic_cast<IfStmt*>(&stmt)) {
@@ -245,6 +248,10 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             reportError(*subscript, "下标访问与数组维度不匹配：" + subscript->array->ident);
             return;
         }
+    } else if (auto addrExpr = dynamic_cast<const AddressOfExpr*>(&expr)) {
+        analyzeExpr(*addrExpr->target);
+    } else if (auto derefExpr = dynamic_cast<const DereferenceExpr*>(&expr)) {
+        analyzeExpr(*derefExpr->pointerExpr);
     }
 }
 
