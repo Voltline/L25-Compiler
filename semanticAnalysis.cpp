@@ -1,4 +1,5 @@
 #include "include/semanticAnalysis.h"
+#include <algorithm>
 extern bool hasError;
 
 /* SemanticAnalyzer 方法定义 */
@@ -48,6 +49,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
     func.scope = currentScope;
     enterScope();
     func.body_scope = currentScope;
+    funcStack.push_back(&func);
     if (func.params) {
         for (const auto& param: func.params->params) {
             // TODO: 这里可能有求值存入value的需求
@@ -59,6 +61,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
         analyzeStmt(*stmt);
     }
     analyzeExpr(*func.return_value);
+    funcStack.pop_back();
     exitScope();
 }
 
@@ -175,6 +178,20 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         if (!checkSymbolExists(ident->ident)) {
             reportError(*ident, "变量未声明：" + ident->ident);
         }
+
+        // 记录闭包捕获
+        if (!funcStack.empty()) {
+            Scope* declScope = findSymbolScope(ident->ident);
+            if (declScope && declScope != funcStack.back()->body_scope) {
+                SymbolInfo* capturedSymbol = currentScope->lookup(ident->ident);
+                if (capturedSymbol && capturedSymbol->kind != SymbolKind::Function && capturedSymbol->kind != SymbolKind::Program) {
+                    auto& captureList = funcStack.back()->captures;
+                    if (std::find(captureList.begin(), captureList.end(), capturedSymbol) == captureList.end()) {
+                        captureList.push_back(capturedSymbol);
+                    }
+                }
+            }
+        }
     } else if (auto binary = dynamic_cast<const BinaryExpr*>(&expr)) {
         analyzeExpr(*binary->lhs);
         analyzeExpr(*binary->rhs);
@@ -277,6 +294,18 @@ void SemanticAnalyzer::exitScope()
         return;
     }
     currentScope = currentScope->getParent();
+}
+
+Scope* SemanticAnalyzer::findSymbolScope(const std::string& name)
+{
+    Scope* scopeIter = currentScope;
+    while (scopeIter) {
+        if (scopeIter->lookupLocal(name)) {
+            return scopeIter;
+        }
+        scopeIter = scopeIter->getParent();
+    }
+    return nullptr;
 }
 
 void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg) 

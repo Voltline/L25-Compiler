@@ -11,6 +11,7 @@ public:
     std::unique_ptr<Scope> rootScope = nullptr;
 private:
     Scope* currentScope = nullptr;
+    std::vector<Func*> funcStack; // 用于记录当前函数链以发现捕获
 
     void analyzeProgram(Program& program);
     void analyzeFunc(Func& func);
@@ -23,6 +24,8 @@ private:
     bool checkSymbolExists(const std::string& name);
 
     bool checkSymbolTypeMatch(const std::string& name, const TypeInfo& type);
+
+    Scope* findSymbolScope(const std::string& name);
 
     Scope* enterScope();
     void exitScope();
