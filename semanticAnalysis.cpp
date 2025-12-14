@@ -536,6 +536,32 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
                 analyzeExpr(*arg);
             }
         }
+    } else if (auto newExpr = dynamic_cast<const NewExpr*>(&expr)) {
+        const std::string className = newExpr->className->ident;
+        auto clsIt = classDecls.find(className);
+        if (clsIt == classDecls.end()) {
+            reportError(*newExpr, "未知的类：" + className);
+            return;
+        }
+
+        size_t argCount = newExpr->args ? newExpr->args->args.size() : 0;
+        bool hasMatchingCtor = false;
+        for (const auto& ctor : clsIt->second->ctors) {
+            size_t paramCount = ctor->params ? ctor->params->params.size() : 0;
+            if (paramCount == argCount) {
+                hasMatchingCtor = true;
+                break;
+            }
+        }
+        if (argCount > 0 && !hasMatchingCtor) {
+            reportError(*newExpr, "未找到匹配参数数量的构造函数");
+        }
+
+        if (newExpr->args) {
+            for (const auto& arg : newExpr->args->args) {
+                analyzeExpr(*arg);
+            }
+        }
     }
 }
 

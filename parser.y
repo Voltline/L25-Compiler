@@ -360,6 +360,17 @@ opt_return_type:
     }
     ;
 
+opt_return:
+    RETURN expr SEMICOLON
+    {
+        $$ = $2;
+    }
+    |
+    {
+        $$ = nullptr;
+    }
+    ;
+
 param_list:
     IDENT
     {
