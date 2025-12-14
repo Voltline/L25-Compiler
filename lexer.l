@@ -43,7 +43,8 @@ ident {letter}({letter}|[0-9])*
 "this"      { updateLocationAndColumn(); return THIS; }
 "new"       { updateLocationAndColumn(); return NEW; }
 "delete"    { updateLocationAndColumn(); return DELETE; }
-"null"      { updateLocationAndColumn(); return NULLSIGN; }
+"nil"       { updateLocationAndColumn(); return NIL; }
+"null"      { updateLocationAndColumn(); return NIL; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
 "float"     { updateLocationAndColumn(); return FLOATSIGN; }
 
@@ -73,6 +74,7 @@ ident {letter}({letter}|[0-9])*
 "["         { updateLocationAndColumn(); return LBRACKET; }
 "]"         { updateLocationAndColumn(); return RBRACKET; }
 ":"         { updateLocationAndColumn(); return COLON; }
+"->"        { updateLocationAndColumn(); return ARROW; }
 ";"         { updateLocationAndColumn(); return SEMICOLON; }
 ","         { updateLocationAndColumn(); return COMMA; }
 "."         { updateLocationAndColumn(); return DOT; }

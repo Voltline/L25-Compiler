@@ -10,9 +10,6 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Type.h>
 
-struct TypeInfo;
-struct Func;
-
 enum class SymbolKind {
     Int,
     Float,
@@ -28,6 +25,19 @@ const char* const SymbolName[] {
     "Int", "Float", "Array", "Pointer", "Class", "Function", "Program", "Invalid"
 };
 
+struct TypeInfo
+{
+    SymbolKind kind; // 类型类别
+    std::vector<int> dims; // 数组维度
+    int pointerLevel; // 指针层级
+    bool isFloat; // 是否为浮点类型
+    std::string className; // 类名（仅用于类/类指针类型）
+
+    TypeInfo();
+    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false, std::string className = "");
+};
+struct Func;
+
 struct SymbolInfo
 {
     SymbolKind kind;
@@ -42,10 +52,12 @@ struct SymbolInfo
     int pointerLevel = 0;               // 指针层级
     bool isFloat = false;               // 浮点标识
     std::string className;              // 类名（用于类及类指针类型）
+    TypeInfo returnType;                // 函数/方法返回类型
     bool hasDestructor = false;         // 类是否定义析构函数
     // 类专用信息
     std::vector<std::pair<std::string, TypeInfo>> classFields; // 记录字段布局
     std::unordered_map<std::string, std::vector<TypeInfo>> methodParamTypes; // 方法参数类型
+    std::unordered_map<std::string, TypeInfo> methodReturnTypes; // 方法返回类型
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

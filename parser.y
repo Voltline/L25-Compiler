@@ -15,6 +15,7 @@ struct ClassMemberAggregate;
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <algorithm>
 #include <iterator>
 extern int yydebug;
 extern int yylineno;
@@ -72,6 +73,7 @@ extern Program* rootProgram;
 
 %type <func> func
 %type <funcList> func_def_list
+%type <typeInfo> opt_return_type
 %type <classDecl> class_def
 %type <classList> class_def_list opt_class_def_list
 %type <classMembers> class_member_list class_member
@@ -114,7 +116,8 @@ extern Program* rootProgram;
 %token <fnum> FLOATNUMBER
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN FLOATSIGN CLASS EXTENDS THIS NEW DELETE
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN CLASS EXTENDS THIS NEW DELETE
+%token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
@@ -256,19 +259,21 @@ field_decl
     ;
 
 method_decl
-    : FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list opt_return RBRACE
+    : FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8));
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $2;
+        delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list opt_return RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($7));
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $2;
+        delete $5;
     }
     ;
 
@@ -300,32 +305,58 @@ dtor_decl
     ;
 
 func:
-    FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list opt_return RBRACE
+    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list opt_return RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($7));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $5;
     }
     ;
 
 nested_func_stmt:
-    FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list opt_return RBRACE
+    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list opt_return RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($7));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $5;
+    }
+    ;
+
+opt_return:
+    RETURN expr SEMICOLON
+    {
+        $$ = $2;
+    }
+    |
+    {
+        $$ = nullptr;
+    }
+    ;
+
+opt_return_type:
+    /* empty */
+    {
+        $$ = new TypeInfo{ SymbolKind::Int, {} };
+    }
+    | ARROW type_info
+    {
+        $$ = $2;
     }
     ;
 
@@ -711,6 +742,12 @@ factor:
     | FLOATNUMBER
     {
         $$ = new FloatNumberExpr($1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | NIL
+    {
+        $$ = new NilExpr();
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }

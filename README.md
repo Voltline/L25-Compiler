@@ -31,6 +31,27 @@ func f1(a) {
 ```
 &emsp; 💡 Although nested functions are allowed, inner functions **cannot access symbols in the outer scope**.
 
+* 🎯 *Typed return values with concise arrow syntax*:
+```L25
+func add(a: int, b: float) -> float {
+    return a + b;
+}
+
+func legacy(a) { // no arrow still defaults to int
+    return a + 1;
+}
+```
+&emsp; Functions and methods default to returning `int` when the `-> <type>` clause is omitted.
+
+* 🌑 *Explicit null pointers via `nil`*:
+```L25
+let p: *int = nil;
+if (p == nil) {
+    output(0);
+};
+```
+&emsp; Literal `0` remains usable as a null pointer, but the compiler will emit a warning recommending `nil` when it is assigned to pointer-typed slots.
+
 * 🧮 *Definition and Invocation of Multidimensional Arrays*:
 ```L25
 ... 
@@ -299,7 +320,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     "let" <ident> ":" <type_info> ";"
 
 <method_def> =
-    "func" <ident> "(" [ <param_list> ] ")" "{"
+    "func" <ident> "(" [ <param_list> ] ")" [ "->" <type_info> ] "{"
         <stmt_list>
         [ "return" <expr> ";" ]
     "}"
@@ -310,7 +331,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     "}"
 
 <func_def> =
-    "func" <ident> "(" [ <param_list> ] ")" "{"
+    "func" <ident> "(" [ <param_list> ] ")" [ "->" <type_info> ] "{"
         <stmt_list>
         [ "return" <expr> ";" ]
     "}"

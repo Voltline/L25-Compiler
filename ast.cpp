@@ -10,6 +10,7 @@ extern bool hasError;
 std::unordered_map<std::string, int> functionMap;
 std::unordered_map<std::string, llvm::StructType*> classStructTypes;
 std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
+std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
 static std::string currentClassNameCodegen;
 
 static llvm::Type* wrapPointer(llvm::Type* base, int pointerLevel)
@@ -137,6 +138,28 @@ static llvm::Value* castValueToType(llvm::Value* value, llvm::Type* targetType, 
     return value;
 }
 
+static llvm::Value* defaultValueForType(const TypeInfo& typeInfo, CodeGenContext& ctx)
+{
+    llvm::Type* llvmTy = typeInfoToLLVMValueType(typeInfo, ctx.context);
+    if (!llvmTy) {
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+
+    if (llvmTy->isPointerTy()) {
+        return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(llvmTy));
+    }
+    if (llvmTy->isFloatingPointTy()) {
+        return llvm::ConstantFP::get(llvmTy, 0.0);
+    }
+    if (llvmTy->isIntegerTy()) {
+        return llvm::ConstantInt::get(llvmTy, 0);
+    }
+    if (llvmTy->isAggregateType()) {
+        return llvm::ConstantAggregateZero::get(llvmTy);
+    }
+    return llvm::UndefValue::get(llvmTy);
+}
+
 static std::string buildCtorName(const std::string& className, size_t paramCount)
 {
     return className + ".__ctor" + std::to_string(paramCount);
@@ -156,11 +179,14 @@ static TypeInfo typeInfoFromSymbol(const SymbolInfo* symbol)
 TypeInfo evaluateExprType(const Expr* expr)
 {
     if (!expr) return TypeInfo{ SymbolKind::Invalid, {}, 0 };
-    if (dynamic_cast<const NumberExpr*>(expr)) {
-        return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    if (auto num = dynamic_cast<const NumberExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0, false, "" };
     }
     if (dynamic_cast<const FloatNumberExpr*>(expr)) {
         return TypeInfo{ SymbolKind::Float, {}, 0, true };
+    }
+    if (dynamic_cast<const NilExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Pointer, {}, 1, false };
     }
     if (auto ident = dynamic_cast<const IdentExpr*>(expr)) {
         SymbolInfo* symbol = ident->scope ? ident->scope->lookup(ident->ident) : nullptr;
@@ -229,8 +255,26 @@ TypeInfo evaluateExprType(const Expr* expr)
     if (auto newExpr = dynamic_cast<const NewExpr*>(expr)) {
         return TypeInfo{ SymbolKind::Class, {}, 1, false, newExpr->className->ident };
     }
-    if (dynamic_cast<const MethodCallExpr*>(expr)) {
+    if (auto methodCall = dynamic_cast<const MethodCallExpr*>(expr)) {
+        TypeInfo targetType = evaluateExprType(methodCall->target.get());
+        std::string className = targetType.className;
+        if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
+            className = targetType.className;
+        }
+        auto retIt = classMethodReturnTypes.find(className);
+        if (retIt != classMethodReturnTypes.end()) {
+            auto mit = retIt->second.find(methodCall->method->ident);
+            if (mit != retIt->second.end()) return mit->second;
+        }
         return TypeInfo{ SymbolKind::Int, {}, 0 };
+    }
+    if (auto funcCall = dynamic_cast<const FuncCallExpr*>(expr)) {
+        if (funcCall->name && funcCall->name->scope) {
+            SymbolInfo* sym = funcCall->name->scope->lookup(funcCall->name->ident);
+            if (sym && sym->kind == SymbolKind::Function) {
+                return sym->returnType.kind == SymbolKind::Invalid ? TypeInfo{ SymbolKind::Int, {}, 0 } : sym->returnType;
+            }
+        }
     }
     return TypeInfo{ SymbolKind::Int, {}, 0 };
 }
@@ -476,11 +520,12 @@ llvm::Value* DtorDecl::codeGen(CodeGenContext& ctx) const
 }
 
 // 方法
-MethodDecl::MethodDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body, std::unique_ptr<Expr> return_value)
+MethodDecl::MethodDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body, std::unique_ptr<Expr> return_value, TypeInfo returnType)
     : name(std::move(name))
     , params(std::move(params))
     , body(std::move(body))
     , return_value(std::move(return_value))
+    , returnType(std::move(returnType))
     , bodyScope(nullptr) {}
 
 void MethodDecl::print(int indent) const
@@ -514,7 +559,9 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getInt32Ty(ctx.context), argTypes, false);
+    llvm::Type* retType = typeInfoToLLVMValueType(returnType, ctx.context);
+    if (!retType) retType = llvm::Type::getInt32Ty(ctx.context);
+    llvm::FunctionType* funcType = llvm::FunctionType::get(retType, argTypes, false);
     std::string funcName = currentClassNameCodegen + "." + name->ident;
     llvm::Function* function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, funcName, ctx.module);
 
@@ -551,8 +598,8 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
-    retVal = castValueToType(retVal, llvm::Type::getInt32Ty(ctx.context), ctx);
+    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : defaultValueForType(returnType, ctx);
+    retVal = castValueToType(retVal, retType, ctx);
     ctx.builder.CreateRet(retVal);
     return function;
 }
@@ -633,11 +680,12 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
 }
 
 // 函数节点
-Func::Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value)
+Func::Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value, TypeInfo returnType)
     : name(std::move(name))
     , params(std::move(params))
     , stmts(std::move(stmts))
-    , return_value(std::move(return_value)) {}
+    , return_value(std::move(return_value))
+    , returnType(std::move(returnType)) {}
 
 void Func::print(int indent) const
 {
@@ -694,8 +742,12 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
         functionMap[funcName]++;
     }
 
+    TypeInfo retTypeInfo = funcSymbol->returnType.kind == SymbolKind::Invalid ? returnType : funcSymbol->returnType;
+    llvm::Type* retLLVMType = typeInfoToLLVMValueType(retTypeInfo, ctx.context);
+    if (!retLLVMType) retLLVMType = llvm::Type::getInt32Ty(ctx.context);
+
     llvm::FunctionType* funcType = llvm::FunctionType::get(
-        llvm::Type::getInt32Ty(ctx.context), argTypes, false
+        retLLVMType, argTypes, false
     );
 
     std::string funcLLVMName = funcSymbol->llvmName;
@@ -753,8 +805,8 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
-    retVal = castValueToType(retVal, llvm::Type::getInt32Ty(ctx.context), ctx);
+    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : defaultValueForType(retTypeInfo, ctx);
+    retVal = castValueToType(retVal, retLLVMType, ctx);
     ctx.builder.CreateRet(retVal);
 
     // 生成完毕后恢复捕获符号的原始地址
@@ -1435,6 +1487,17 @@ void FloatNumberExpr::print(int indent) const
 llvm::Value* FloatNumberExpr::codeGen(CodeGenContext& ctx) const
 {
     return llvm::ConstantFP::get(llvm::Type::getFloatTy(ctx.context), value);
+}
+
+void NilExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Nil" << std::endl;
+}
+
+llvm::Value* NilExpr::codeGen(CodeGenContext& ctx) const
+{
+    auto* ptrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    return llvm::ConstantPointerNull::get(ptrTy);
 }
 
 // 一元运算符节点

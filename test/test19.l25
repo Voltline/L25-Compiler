@@ -1,0 +1,30 @@
+program test19 {
+    func to_float(x: int) -> float {
+        return x + 1;
+    }
+
+    func make_nil() -> *int {
+        return nil;
+    }
+
+    func accept_ptr(p: *int) {
+        if (p == nil) {
+            output(42);
+        };
+    }
+
+    func main_helper(a: int) -> float {
+        return to_float(a);
+    }
+
+    main {
+        let v: float = main_helper(2);
+        output(v);
+
+        let p: *int = nil;
+        accept_ptr(p);
+
+        let q: *int = make_nil();
+        accept_ptr(q);
+    }
+}
