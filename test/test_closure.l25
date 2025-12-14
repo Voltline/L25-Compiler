@@ -1,0 +1,16 @@
+program closuredemo {
+    func makeAdder(base: int) {
+        let current: int = base;
+        func add(step: int) {
+            current = current + step;
+            output(current);
+            return current;
+        };
+        add(1);
+        add(2);
+        return current;
+    }
+    main {
+        makeAdder(5);
+    }
+}

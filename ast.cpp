@@ -1,25 +1,189 @@
 #include "include/ast.h"
+#include "include/errorReporter.h"
 #include <llvm/IR/Type.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <unordered_map>
+#include <algorithm>
 extern bool hasError;
 std::unordered_map<std::string, int> functionMap;
 
+static llvm::Type* wrapPointer(llvm::Type* base, int pointerLevel)
+{
+    for (int i = 0; i < pointerLevel; ++i) {
+        base = llvm::PointerType::get(base, 0);
+    }
+    return base;
+}
+
+static llvm::Type* buildArrayType(llvm::Type* elementType, const std::vector<int>& dims)
+{
+    llvm::Type* arrayType = elementType;
+    for (auto it = dims.rbegin(); it != dims.rend(); ++it) {
+        arrayType = llvm::ArrayType::get(arrayType, *it);
+    }
+    return arrayType;
+}
+
+static llvm::Type* typeInfoToLLVMType(const TypeInfo& typeInfo, llvm::LLVMContext& ctx, bool decayArrayToPointer)
+{
+    llvm::Type* baseType = nullptr;
+    llvm::Type* scalarType = (typeInfo.kind == SymbolKind::Float || typeInfo.isFloat)
+        ? llvm::Type::getFloatTy(ctx)
+        : llvm::Type::getInt32Ty(ctx);
+
+    if (typeInfo.kind == SymbolKind::Int || typeInfo.kind == SymbolKind::Float) {
+        baseType = scalarType;
+    } else if (typeInfo.kind == SymbolKind::Array) {
+        auto* arrayType = buildArrayType(scalarType, typeInfo.dims);
+        baseType = decayArrayToPointer ? llvm::PointerType::get(arrayType, 0) : arrayType;
+    } else if (typeInfo.kind == SymbolKind::Pointer) {
+        baseType = scalarType;
+    }
+
+    if (!baseType) return nullptr;
+
+    int wrapTimes = typeInfo.pointerLevel;
+    if (typeInfo.kind == SymbolKind::Array && decayArrayToPointer && wrapTimes > 0) {
+        // 数组已经退化为指针，额外的指针层级需要在此基础上继续包裹
+        wrapTimes -= 1;
+    }
+    return wrapPointer(baseType, wrapTimes);
+}
+
+static llvm::Type* typeInfoToLLVMValueType(const TypeInfo& typeInfo, llvm::LLVMContext& ctx)
+{
+    llvm::Type* scalarType = (typeInfo.kind == SymbolKind::Float || typeInfo.isFloat)
+        ? llvm::Type::getFloatTy(ctx)
+        : llvm::Type::getInt32Ty(ctx);
+
+    if (typeInfo.kind == SymbolKind::Pointer) {
+        return wrapPointer(scalarType, std::max(1, typeInfo.pointerLevel));
+    }
+    return wrapPointer(
+        typeInfo.kind == SymbolKind::Array
+            ? buildArrayType(scalarType, typeInfo.dims)
+            : scalarType,
+        typeInfo.pointerLevel
+    );
+}
+
+static llvm::Value* castValueToType(llvm::Value* value, llvm::Type* targetType, CodeGenContext& ctx)
+{
+    if (!value || !targetType) return value;
+    llvm::Type* srcType = value->getType();
+    if (srcType == targetType) return value;
+
+    if (targetType->isFloatTy()) {
+        if (srcType->isIntegerTy()) {
+            return ctx.builder.CreateSIToFP(value, targetType, "sitofp");
+        }
+        if (srcType->isFloatTy()) {
+            return ctx.builder.CreateFPCast(value, targetType, "fpc");
+        }
+    }
+
+    if (targetType->isIntegerTy()) {
+        if (srcType->isFloatTy()) {
+            return ctx.builder.CreateFPToSI(value, targetType, "fptosi");
+        }
+        if (srcType->isIntegerTy()) {
+            return ctx.builder.CreateIntCast(value, targetType, true, "intcast");
+        }
+    }
+
+    if (targetType->isPointerTy() && srcType->isPointerTy()) {
+        return ctx.builder.CreateBitCast(value, targetType, "bitcast");
+    }
+
+    if (targetType->isPointerTy() && srcType->isIntegerTy()) {
+        return ctx.builder.CreateIntToPtr(value, targetType, "inttoptr");
+    }
+
+    return value;
+}
+
+static TypeInfo typeInfoFromSymbol(const SymbolInfo* symbol)
+{
+    if (!symbol) return TypeInfo{};
+    return TypeInfo{ symbol->kind, symbol->dimensions, symbol->pointerLevel, symbol->isFloat };
+}
+
+static TypeInfo evaluateExprType(const Expr* expr)
+{
+    if (!expr) return TypeInfo{ SymbolKind::Invalid, {}, 0 };
+    if (dynamic_cast<const NumberExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    if (dynamic_cast<const FloatNumberExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Float, {}, 0, true };
+    }
+    if (auto ident = dynamic_cast<const IdentExpr*>(expr)) {
+        SymbolInfo* symbol = ident->scope ? ident->scope->lookup(ident->ident) : nullptr;
+        if (symbol) return typeInfoFromSymbol(symbol);
+        return TypeInfo{ SymbolKind::Int, {}, 0 };
+    }
+    if (auto arrayExpr = dynamic_cast<const ArraySubscriptExpr*>(expr)) {
+        Scope* lookupScope = arrayExpr->scope ? arrayExpr->scope : (arrayExpr->array ? arrayExpr->array->scope : nullptr);
+        SymbolInfo* symbol = lookupScope ? lookupScope->lookup(arrayExpr->array->ident) : nullptr;
+        bool isFloatElem = symbol && symbol->isFloat;
+        return TypeInfo{ isFloatElem ? SymbolKind::Float : SymbolKind::Int, {}, 0, isFloatElem };
+    }
+    if (auto addrExpr = dynamic_cast<const AddressOfExpr*>(expr)) {
+        TypeInfo baseType = evaluateExprType(addrExpr->target.get());
+        if (baseType.kind == SymbolKind::Array) {
+            baseType.kind = SymbolKind::Pointer;
+            baseType.dims.clear();
+        } else if (baseType.kind == SymbolKind::Invalid) {
+            baseType.kind = SymbolKind::Pointer;
+        }
+        baseType.pointerLevel += 1;
+        if (baseType.kind == SymbolKind::Int || baseType.kind == SymbolKind::Float) {
+            baseType.kind = SymbolKind::Pointer;
+        }
+        return baseType;
+    }
+    if (auto derefExpr = dynamic_cast<const DereferenceExpr*>(expr)) {
+        TypeInfo baseType = evaluateExprType(derefExpr->pointerExpr.get());
+        if (baseType.pointerLevel > 0) {
+            baseType.pointerLevel -= 1;
+            if (baseType.pointerLevel == 0 && baseType.kind == SymbolKind::Pointer) {
+                baseType.kind = baseType.isFloat ? SymbolKind::Float : SymbolKind::Int;
+            }
+        } else {
+            baseType.kind = baseType.isFloat ? SymbolKind::Float : SymbolKind::Int;
+        }
+        return baseType;
+    }
+    if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {
+        TypeInfo lhsType = evaluateExprType(binary->lhs.get());
+        TypeInfo rhsType = evaluateExprType(binary->rhs.get());
+        bool isFloatResult = lhsType.isFloat || rhsType.isFloat || lhsType.kind == SymbolKind::Float || rhsType.kind == SymbolKind::Float;
+        if (isFloatResult) {
+            return TypeInfo{ SymbolKind::Float, {}, 0, true };
+        }
+        return TypeInfo{ SymbolKind::Int, {}, 0 };
+    }
+    if (auto unary = dynamic_cast<const UnaryExpr*>(expr)) {
+        TypeInfo rhsType = evaluateExprType(unary->rhs.get());
+        if (rhsType.isFloat || rhsType.kind == SymbolKind::Float) {
+            return TypeInfo{ SymbolKind::Float, {}, rhsType.pointerLevel, true };
+        }
+        return TypeInfo{ SymbolKind::Int, {}, rhsType.pointerLevel };
+    }
+    return TypeInfo{ SymbolKind::Int, {}, 0 };
+}
+
 // TypeInfo 方法
 TypeInfo::TypeInfo()
-    : kind(SymbolKind::Invalid), dims() {}
+    : kind(SymbolKind::Invalid), dims(), pointerLevel(0), isFloat(false) {}
 
-TypeInfo::TypeInfo(SymbolKind kind, std::vector<int> dims)
-    : kind(kind), dims(std::move(dims)) {}
+TypeInfo::TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel, bool isFloat)
+    : kind(kind), dims(std::move(dims)), pointerLevel(pointerLevel), isFloat(isFloat) {}
 
 // ASTNode 方法
 void ASTNode::reportError(const std::string& msg) const
 {
-    std::cerr 
-        << "\033[1;31m[代码生成错误]\033[0m "
-        << "位于 \033[1;33m第 " << lineno 
-        << " 行, 第 " << column << " 列\033[0m: "
-        << msg << std::endl;
-    hasError = true;
+    reportErrorAt(*this, "代码生成", msg);
 }
 
 // 程序节点
@@ -110,16 +274,24 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
 
     std::vector<llvm::Type*> argTypes;
     for (const auto& typeInfo: funcSymbol->paramTypes) {
+        llvm::Type* argType = nullptr;
         if (typeInfo.kind == SymbolKind::Array) {
-            // 数组退化成指针
-            llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
-            llvm::Type* arrayType = elementType;
-            for (int i = typeInfo.dims.size() - 1; i >= 0; i--) {
-                arrayType = llvm::ArrayType::get(arrayType, typeInfo.dims[i]);
-            }
-            argTypes.push_back(llvm::PointerType::get(arrayType, 0));
+            argType = typeInfoToLLVMType(typeInfo, ctx.context, true);
         } else {
-            argTypes.push_back(llvm::Type::getInt32Ty(ctx.context));
+            argType = typeInfoToLLVMValueType(typeInfo, ctx.context);
+        }
+        argTypes.push_back(argType);
+    }
+
+    // 隐式捕获参数（以指针方式传递）
+    for (auto* captured : captures) {
+        if (!captured) continue;
+        if (captured->kind == SymbolKind::Array) {
+            TypeInfo captureType{ SymbolKind::Array, captured->dimensions, 1, captured->isFloat };
+            argTypes.push_back(typeInfoToLLVMType(captureType, ctx.context, true));
+        } else {
+            TypeInfo captureType{ captured->kind, {}, captured->pointerLevel + 1, captured->isFloat };
+            argTypes.push_back(typeInfoToLLVMValueType(captureType, ctx.context));
         }
     }
     
@@ -146,20 +318,38 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
     llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
     ctx.builder.SetInsertPoint(entry);
 
+    std::vector<std::pair<SymbolInfo*, llvm::Value*>> capturedOriginalAddrs;
+
     int idx = 0;
     for (auto& arg: function->args()) {
-        arg.setName(params->params[idx]->ident); // 设置形参名
-        SymbolInfo* argInfo = body_scope->lookupLocal(params->params[idx]->ident);
-        
-        if (argInfo->kind == SymbolKind::Array) {
-            // 数组：直接把传入的指针存储在 alloca 里
-            argInfo->addr = &arg;
+        if (params && idx < static_cast<int>(params->params.size())) {
+            arg.setName(params->params[idx]->ident); // 设置形参名
+            SymbolInfo* argInfo = body_scope->lookupLocal(params->params[idx]->ident);
+
+            if (argInfo->kind == SymbolKind::Array) {
+                argInfo->isFuncParam = true;
+                auto* placeholder = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName() + ".addr");
+                ctx.builder.CreateStore(&arg, placeholder);
+                argInfo->addr = placeholder;
+            } else {
+                llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
+                ctx.builder.CreateStore(&arg, alloca);
+                argInfo->addr = alloca;
+            }
+            argInfo->value = &arg;
         } else {
-            llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
-            ctx.builder.CreateStore(&arg, alloca);
-            argInfo->addr = alloca;
+            int captureIndex = idx - (params ? static_cast<int>(params->params.size()) : 0);
+            if (captureIndex >= 0 && captureIndex < static_cast<int>(captures.size())) {
+                SymbolInfo* capturedInfo = captures[captureIndex];
+                std::string captureName = capturedInfo ? capturedInfo->name + "_capture" : "capture";
+                arg.setName(captureName);
+                if (capturedInfo) {
+                    capturedOriginalAddrs.emplace_back(capturedInfo, capturedInfo->addr);
+                    capturedInfo->addr = &arg;
+                    capturedInfo->value = &arg;
+                }
+            }
         }
-        argInfo->value = &arg;
         idx++;
     }
 
@@ -174,7 +364,13 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
     }
 
     llvm::Value* retVal = return_value->codeGen(ctx);
+    retVal = castValueToType(retVal, llvm::Type::getInt32Ty(ctx.context), ctx);
     ctx.builder.CreateRet(retVal);
+
+    // 生成完毕后恢复捕获符号的原始地址
+    for (auto& [symbol, originalAddr] : capturedOriginalAddrs) {
+        symbol->addr = originalAddr;
+    }
 
     return function;
 }
@@ -233,32 +429,23 @@ void DeclareStmt::print(int indent) const
     }
 }
 
-llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const  
+llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
 {
-    llvm::Type* intType = llvm::Type::getInt32Ty(ctx.context);
-    llvm::AllocaInst* alloca = nullptr;
-
     const std::string& ident_name = name->ident;
     auto typeInfo = name->type;
+    llvm::Type* valueType = typeInfoToLLVMValueType(typeInfo, ctx.context);
+    llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(valueType, nullptr, ident_name);
 
-    if (typeInfo.kind == SymbolKind::Int) {
-        // 普通整形的分配
-        alloca = ctx.builder.CreateAlloca(intType, nullptr, ident_name);
-        // 赋初值0 
+    if ((typeInfo.kind == SymbolKind::Int || typeInfo.kind == SymbolKind::Float) && typeInfo.pointerLevel == 0) {
         if (!expr) {
-            llvm::Value* zeroInit = llvm::ConstantInt::get(intType, 0);
+            llvm::Value* zeroInit = typeInfo.kind == SymbolKind::Float
+                ? static_cast<llvm::Value*>(llvm::ConstantFP::get(valueType, 0.0))
+                : static_cast<llvm::Value*>(llvm::ConstantInt::get(valueType, 0));
             ctx.builder.CreateStore(zeroInit, alloca);
         }
-    } else if (typeInfo.kind == SymbolKind::Array) {
-        // 多维数组的分配
-        llvm::Type* arrayType = intType;
-        for (auto it{ typeInfo.dims.rbegin() }; it != typeInfo.dims.rend(); it++) {
-            arrayType = llvm::ArrayType::get(arrayType, *it);
-        }
-        alloca = ctx.builder.CreateAlloca(arrayType, nullptr, ident_name);
-
+    } else if (typeInfo.kind == SymbolKind::Array && typeInfo.pointerLevel == 0) {
         // 类型参数列表：i8* 和 i64
-        auto memsetFn = llvm::Intrinsic::getOrInsertDeclaration(
+        auto memsetFn = llvm::Intrinsic::getDeclaration(
             &ctx.module,
             llvm::Intrinsic::memset,
             {
@@ -267,21 +454,21 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
             }
         );
 
-        // 构造参数
         llvm::Value* zeroVal = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx.context), 0);
         llvm::Value* sizeVal = llvm::ConstantInt::get(
             llvm::Type::getInt64Ty(ctx.context),
-            ctx.module.getDataLayout().getTypeAllocSize(arrayType)
+            ctx.module.getDataLayout().getTypeAllocSize(valueType)
         );
         llvm::Value* isVolatile = llvm::ConstantInt::getFalse(ctx.context);
 
-        // 调用 memset
         ctx.builder.CreateCall(memsetFn, {
             ctx.builder.CreateBitCast(alloca, llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0)),
             zeroVal,
             sizeVal,
             isVolatile
         });
+    } else if (valueType->isPointerTy() && !expr) {
+        ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(valueType)), alloca);
     }
 
     if (!alloca) {
@@ -297,10 +484,9 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
     if (expr) {
         llvm::Value* initVal = expr->codeGen(ctx);
         if (initVal) {
-            // 普通变量直接存入
-            if (typeInfo.kind == SymbolKind::Int) {
-                ctx.builder.CreateStore(initVal, alloca);
-            }
+            llvm::Type* targetType = valueType;
+            llvm::Value* stored = castValueToType(initVal, targetType, ctx);
+            ctx.builder.CreateStore(stored, alloca);
         }
     }
     return alloca;
@@ -327,7 +513,8 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
 
     llvm::Value* lhsAddr = nullptr;
     
-    // 普通变量
+    SymbolInfo* targetSymbol = nullptr;
+
     if (auto identExpr = dynamic_cast<IdentExpr*>(name.get())) {
         SymbolInfo* symbol = scope->lookup(identExpr->ident);
         if (!symbol || !symbol->addr) {
@@ -335,10 +522,20 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
             return nullptr;
         }
         lhsAddr = symbol->addr;
+        targetSymbol = symbol;
     } else if (auto arrayExpr = dynamic_cast<ArraySubscriptExpr*>(name.get())) {
         lhsAddr = arrayExpr->getAddress(ctx);
+        if (arrayExpr->array && arrayExpr->array->scope) {
+            targetSymbol = arrayExpr->array->scope->lookup(arrayExpr->array->ident);
+        }
         if (!lhsAddr) {
             reportError("获取数组元素地址失败");
+            return nullptr;
+        }
+    } else if (auto derefExpr = dynamic_cast<DereferenceExpr*>(name.get())) {
+        lhsAddr = derefExpr->getPointerValue(ctx);
+        if (!lhsAddr || !lhsAddr->getType()->isPointerTy()) {
+            reportError("解引用目标不是合法的指针地址");
             return nullptr;
         }
     } else {
@@ -346,10 +543,10 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
         return nullptr;
     }
 
-    if (!lhsAddr) {
-
-    }
-    ctx.builder.CreateStore(rhs, lhsAddr);
+    TypeInfo lhsType = targetSymbol ? typeInfoFromSymbol(targetSymbol) : evaluateExprType(name.get());
+    llvm::Type* targetType = typeInfoToLLVMValueType(lhsType, ctx.context);
+    llvm::Value* storedValue = castValueToType(rhs, targetType, ctx);
+    ctx.builder.CreateStore(storedValue, lhsAddr);
     return rhs;
 }
 
@@ -502,15 +699,37 @@ llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const
 
     std::vector<llvm::Value*> argsV;
     if (args) {
+        int idx = 0;
         for (const auto& argExpr: args->args) {
             llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
+
+            if (idx < static_cast<int>(funcSymbol->paramTypes.size())) {
+                const TypeInfo& expected = funcSymbol->paramTypes[idx];
+                llvm::Type* expectedType = expected.kind == SymbolKind::Array
+                    ? typeInfoToLLVMType(expected, ctx.context, true)
+                    : typeInfoToLLVMValueType(expected, ctx.context);
+                argVal = castValueToType(argVal, expectedType, ctx);
+            }
             argsV.push_back(argVal);
+            idx++;
+        }
+    }
+
+    if (funcSymbol->funcDef) {
+        for (auto* captured : funcSymbol->funcDef->captures) {
+            if (!captured) continue;
+            SymbolInfo* callerSymbol = scope->lookup(captured->name);
+            if (!callerSymbol || !callerSymbol->addr) {
+                reportError("捕获变量: " + captured->name + " 在调用点不可用");
+                return nullptr;
+            }
+            argsV.push_back(callerSymbol->addr);
         }
     }
 
     ctx.builder.CreateCall(calleeFunc, argsV);
-    return nullptr; // 作为语句，不返回值 
+    return nullptr; // 作为语句，不返回值
 }
 
 // 输入语句节点
@@ -540,17 +759,18 @@ llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const
         scanfFunc = llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", ctx.module);
     }
 
-    llvm::Value* formatStr = ctx.builder.CreateGlobalString("%d");
-
     for (auto& ident: idents) {
         assert(scope && "InputStmt::codeGen 中的 scope 为空");
         llvm::Value* addr = nullptr;
+        bool expectFloat = false;
         if (auto* idExpr = dynamic_cast<IdentExpr*>(ident.get())) {
             SymbolInfo* symbol = scope->lookup(idExpr->ident);
             if (!symbol) {
                 reportError("变量: " + idExpr->ident + " 未声明");
                 return nullptr;
             }
+
+            expectFloat = symbol->isFloat;
 
             if (symbol->kind == SymbolKind::Array) {
                 reportError("不支持直接输入数组: " + idExpr->ident);
@@ -564,10 +784,16 @@ llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const
             addr = symbol->addr;
         } else if (auto* arraySubscriptExpr = dynamic_cast<ArraySubscriptExpr*>(ident.get())) {
             addr = arraySubscriptExpr->getAddress(ctx);
+            SymbolInfo* arraySymbol = scope->lookup(arraySubscriptExpr->array->ident);
+            if (arraySymbol) {
+                expectFloat = arraySymbol->isFloat;
+            }
             if (!addr) {
                 reportError("数组下标访问异常");
             }
         }
+        std::string fmt = expectFloat ? "%f" : "%d";
+        llvm::Value* formatStr = ctx.builder.CreateGlobalString(fmt);
         ctx.builder.CreateCall(scanfFunc, { formatStr, addr });
     }
     return nullptr;
@@ -615,8 +841,23 @@ llvm::Value* OutputStmt::codeGen(CodeGenContext& ctx) const {
             if (!formatStr.empty()) {
                 formatStr += " "; // 多个数之间空格分隔
             }
-            formatStr += "%d";
-            printfArgs.push_back(val);
+            if (val->getType()->isIntegerTy(1)) {
+                val = ctx.builder.CreateZExt(val, llvm::Type::getInt32Ty(ctx.context));
+            }
+
+            if (val->getType()->isFloatingPointTy()) {
+                formatStr += "%f";
+                llvm::Value* promoted = ctx.builder.CreateFPExt(val, llvm::Type::getDoubleTy(ctx.context), "fpext_print");
+                printfArgs.push_back(promoted);
+            } else {
+                formatStr += "%d";
+                if (val->getType()->isIntegerTy(32)) {
+                    printfArgs.push_back(val);
+                } else {
+                    llvm::Value* casted = castValueToType(val, llvm::Type::getInt32Ty(ctx.context), ctx);
+                    printfArgs.push_back(casted);
+                }
+            }
         }
     }
 
@@ -643,7 +884,7 @@ void BoolExpr::print(int indent) const
     rhs->print(indent + 2);
 }
 
-llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const  
+llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const
 {
     llvm::Value* lhsVal = lhs->codeGen(ctx);
     llvm::Value* rhsVal = rhs->codeGen(ctx);
@@ -653,40 +894,71 @@ llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const
         return nullptr;
     }
 
-    if (lhsVal->getType()->isIntegerTy() && rhsVal->getType()->isIntegerTy()) {
+    bool useFloat = lhsVal->getType()->isFloatingPointTy() || rhsVal->getType()->isFloatingPointTy();
+    if (useFloat) {
+        lhsVal = castValueToType(lhsVal, llvm::Type::getFloatTy(ctx.context), ctx);
+        rhsVal = castValueToType(rhsVal, llvm::Type::getFloatTy(ctx.context), ctx);
         if (symbol == "==") {
-            return ctx.builder.CreateICmpEQ(lhsVal, rhsVal, "cmpeq");
+            return ctx.builder.CreateFCmpOEQ(lhsVal, rhsVal, "fcmp_eq");
         } else if (symbol == "!=") {
-            return ctx.builder.CreateICmpNE(lhsVal, rhsVal, "cmpne");
+            return ctx.builder.CreateFCmpONE(lhsVal, rhsVal, "fcmp_ne");
         } else if (symbol == "<") {
-            return ctx.builder.CreateICmpSLT(lhsVal, rhsVal, "cmplt");
+            return ctx.builder.CreateFCmpOLT(lhsVal, rhsVal, "fcmp_lt");
         } else if (symbol == "<=") {
-            return ctx.builder.CreateICmpSLE(lhsVal, rhsVal, "cmple");
+            return ctx.builder.CreateFCmpOLE(lhsVal, rhsVal, "fcmp_le");
         } else if (symbol == ">") {
-            return ctx.builder.CreateICmpSGT(lhsVal, rhsVal, "cmpgt");
+            return ctx.builder.CreateFCmpOGT(lhsVal, rhsVal, "fcmp_gt");
         } else if (symbol == ">=") {
-            return ctx.builder.CreateICmpSGE(lhsVal, rhsVal, "cmpge");
-        } else {
-            reportError("不支持的布尔操作符");
-            return nullptr;
+            return ctx.builder.CreateFCmpOGE(lhsVal, rhsVal, "fcmp_ge");
         }
-    } else {
-        reportError("不支持非整数类型的布尔比较");
+        reportError("不支持的布尔操作符");
         return nullptr;
     }
+
+    lhsVal = castValueToType(lhsVal, llvm::Type::getInt32Ty(ctx.context), ctx);
+    rhsVal = castValueToType(rhsVal, llvm::Type::getInt32Ty(ctx.context), ctx);
+    if (symbol == "==") {
+        return ctx.builder.CreateICmpEQ(lhsVal, rhsVal, "cmpeq");
+    } else if (symbol == "!=") {
+        return ctx.builder.CreateICmpNE(lhsVal, rhsVal, "cmpne");
+    } else if (symbol == "<") {
+        return ctx.builder.CreateICmpSLT(lhsVal, rhsVal, "cmplt");
+    } else if (symbol == "<=") {
+        return ctx.builder.CreateICmpSLE(lhsVal, rhsVal, "cmple");
+    } else if (symbol == ">") {
+        return ctx.builder.CreateICmpSGT(lhsVal, rhsVal, "cmpgt");
+    } else if (symbol == ">=") {
+        return ctx.builder.CreateICmpSGE(lhsVal, rhsVal, "cmpge");
+    }
+
+    reportError("不支持的布尔操作符");
+    return nullptr;
 }
 
 // 整数常量节点
 NumberExpr::NumberExpr(int val) : value(val) {}
 
-void NumberExpr::print(int indent) const  
+void NumberExpr::print(int indent) const
 {
     std::cout << std::string(indent, ' ') << "Number(" << value << ")" << std::endl;
 }
 
-llvm::Value* NumberExpr::codeGen(CodeGenContext& ctx) const 
+llvm::Value* NumberExpr::codeGen(CodeGenContext& ctx) const
 {
     return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), value);
+}
+
+// 浮点常量节点
+FloatNumberExpr::FloatNumberExpr(double val) : value(val) {}
+
+void FloatNumberExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Float(" << value << ")" << std::endl;
+}
+
+llvm::Value* FloatNumberExpr::codeGen(CodeGenContext& ctx) const
+{
+    return llvm::ConstantFP::get(llvm::Type::getFloatTy(ctx.context), value);
 }
 
 // 一元运算符节点
@@ -698,17 +970,84 @@ void UnaryExpr::print(int indent) const
     rhs->print(indent+2);
 }
 
-llvm::Value* UnaryExpr::codeGen(CodeGenContext& ctx) const 
+llvm::Value* UnaryExpr::codeGen(CodeGenContext& ctx) const
 {
     llvm::Value* RHS = rhs->codeGen(ctx);
     switch (op) {
     case '+':
         return RHS;
     case '-':
+        if (RHS->getType()->isFloatingPointTy()) {
+            return ctx.builder.CreateFNeg(RHS);
+        }
         return ctx.builder.CreateNeg(RHS);
     default:
         return nullptr;
     }
+}
+
+AddressOfExpr::AddressOfExpr(std::unique_ptr<Expr> target)
+    : target(std::move(target)) {}
+
+void AddressOfExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "AddressOf" << std::endl;
+    target->print(indent + 2);
+}
+
+llvm::Value* AddressOfExpr::codeGen(CodeGenContext& ctx) const
+{
+    if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {
+        SymbolInfo* symbol = scope->lookup(ident->ident);
+        if (!symbol || !symbol->addr) {
+            reportError("变量未声明或未分配空间: " + ident->ident);
+            return nullptr;
+        }
+        if (symbol->kind == SymbolKind::Array) {
+            // 取数组首元素地址
+            std::vector<llvm::Value*> indices;
+            indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));
+            for (size_t i = 0; i < symbol->dimensions.size(); ++i) {
+                indices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));
+            }
+            llvm::Type* arrayType = buildArrayType(llvm::Type::getInt32Ty(ctx.context), symbol->dimensions);
+            return ctx.builder.CreateGEP(arrayType, symbol->addr, indices, ident->ident + "_addr");
+        }
+        return symbol->addr;
+    }
+    if (auto subscript = dynamic_cast<ArraySubscriptExpr*>(target.get())) {
+        return subscript->getAddress(ctx);
+    }
+    reportError("无法对该表达式取地址");
+    return nullptr;
+}
+
+DereferenceExpr::DereferenceExpr(std::unique_ptr<Expr> pointerExpr)
+    : pointerExpr(std::move(pointerExpr)) {}
+
+void DereferenceExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Deref" << std::endl;
+    pointerExpr->print(indent + 2);
+}
+
+llvm::Value* DereferenceExpr::getPointerValue(CodeGenContext& ctx) const
+{
+    llvm::Value* ptrVal = pointerExpr->codeGen(ctx);
+    if (!ptrVal || !ptrVal->getType()->isPointerTy()) {
+        reportError("尝试解引用非指针类型");
+        return nullptr;
+    }
+    return ptrVal;
+}
+
+llvm::Value* DereferenceExpr::codeGen(CodeGenContext& ctx) const
+{
+    llvm::Value* ptrVal = getPointerValue(ctx);
+    if (!ptrVal) return nullptr;
+    TypeInfo pointeeInfo = evaluateExprType(this);
+    llvm::Type* loadType = typeInfoToLLVMValueType(pointeeInfo, ctx.context);
+    return ctx.builder.CreateLoad(loadType, ptrVal, "deref");
 }
 
 // 二元运算符节点
@@ -731,11 +1070,30 @@ llvm::Value* BinaryExpr::codeGen(CodeGenContext& ctx) const
         return nullptr;
     }
 
-    if (!LHS->getType()->isIntegerTy(32) || !RHS->getType()->isIntegerTy(32)) {
-        reportError("非整数元素不能参与二元运算");
-        return nullptr;
+    bool useFloat = LHS->getType()->isFloatingPointTy() || RHS->getType()->isFloatingPointTy();
+    if (useFloat) {
+        LHS = castValueToType(LHS, llvm::Type::getFloatTy(ctx.context), ctx);
+        RHS = castValueToType(RHS, llvm::Type::getFloatTy(ctx.context), ctx);
+        switch (op) {
+        case '+':
+            return ctx.builder.CreateFAdd(LHS, RHS, "faddtmp");
+        case '-':
+            return ctx.builder.CreateFSub(LHS, RHS, "fsubtmp");
+        case '*':
+            return ctx.builder.CreateFMul(LHS, RHS, "fmultmp");
+        case '/':
+            return ctx.builder.CreateFDiv(LHS, RHS, "fdivtmp");
+        case '%':
+            reportError("浮点数不支持取模运算");
+            return nullptr;
+        default:
+            reportError("不支持的二元运算符: " + std::string(1, op));
+            return nullptr;
+        }
     }
 
+    LHS = castValueToType(LHS, llvm::Type::getInt32Ty(ctx.context), ctx);
+    RHS = castValueToType(RHS, llvm::Type::getInt32Ty(ctx.context), ctx);
     switch (op) {
     case '+':
         return ctx.builder.CreateAdd(LHS, RHS, "addtmp");
@@ -777,7 +1135,7 @@ llvm::Value* ArraySubscriptExpr::codeGen(CodeGenContext& ctx) const {
     llvm::Value* arrayPtr = nullptr;
 
     // 构造数组的完整类型：[d1 x [d2 x ... [dn x i32]]]
-    llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
+    llvm::Type* elementType = symbol->isFloat ? llvm::Type::getFloatTy(ctx.context) : llvm::Type::getInt32Ty(ctx.context);
     for (int i = symbol->dimensions.size() - 1; i >= 0; --i) {
         elementType = llvm::ArrayType::get(elementType, symbol->dimensions[i]);
     }
@@ -817,7 +1175,8 @@ llvm::Value* ArraySubscriptExpr::codeGen(CodeGenContext& ctx) const {
         "array_elem"
     );
 
-    return ctx.builder.CreateLoad(llvm::Type::getInt32Ty(ctx.context), gep, "load_elem");
+    llvm::Type* valueType = symbol->isFloat ? llvm::Type::getFloatTy(ctx.context) : llvm::Type::getInt32Ty(ctx.context);
+    return ctx.builder.CreateLoad(valueType, gep, "load_elem");
 }
 
 llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
@@ -831,7 +1190,7 @@ llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
     llvm::Value* arrayPtr = nullptr;
 
     // 构造完整数组类型
-    llvm::Type* elementType = llvm::Type::getInt32Ty(ctx.context);
+    llvm::Type* elementType = symbol->isFloat ? llvm::Type::getFloatTy(ctx.context) : llvm::Type::getInt32Ty(ctx.context);
     for (int i = symbol->dimensions.size() - 1; i >= 0; --i) {
         elementType = llvm::ArrayType::get(elementType, symbol->dimensions[i]);
     }
@@ -876,14 +1235,19 @@ void IdentExpr::print(int indent) const
 {
     switch (type.kind) {
     case SymbolKind::Int:
+    case SymbolKind::Float:
     case SymbolKind::Function:
     case SymbolKind::Program:
-        std::cout << std::string(indent, ' ') 
-            << "Ident(" << ident << ": " 
+        std::cout << std::string(indent, ' ')
+            << "Ident(" << ident << ": "
             << SymbolName[static_cast<int>(type.kind)] << ")" << std::endl;
         break;
+    case SymbolKind::Pointer:
+        std::cout << std::string(indent, ' ')
+            << "Ident(" << ident << ": Pointer^" << std::max(1, type.pointerLevel) << ")" << std::endl;
+        break;
     case SymbolKind::Array:
-        std::cout << std::string(indent, ' ') 
+        std::cout << std::string(indent, ' ')
             << "Ident(" << ident << ": Array[";
         for (int i = 0; i < type.dims.size(); i++) {
             if (i != 0) std::cout << ",";
@@ -907,8 +1271,12 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
     }
 
     // 如果为变量
-    if (symbol->kind == SymbolKind::Int) {
-        llvm::Type* valueType = llvm::Type::getInt32Ty(ctx.context);
+    if (symbol->kind == SymbolKind::Int || symbol->kind == SymbolKind::Float) {
+        llvm::Type* valueType = symbol->isFloat ? llvm::Type::getFloatTy(ctx.context) : llvm::Type::getInt32Ty(ctx.context);
+        return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
+    } else if (symbol->kind == SymbolKind::Pointer) {
+        TypeInfo symbolType{ SymbolKind::Pointer, {}, symbol->pointerLevel, symbol->isFloat };
+        llvm::Type* valueType = typeInfoToLLVMValueType(symbolType, ctx.context);
         return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
@@ -948,10 +1316,32 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
 
     std::vector<llvm::Value*> argsV;
     if (args) {
+        int idx = 0;
         for (const auto& argExpr: args->args) {
             llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
+
+            if (idx < static_cast<int>(funcSymbol->paramTypes.size())) {
+                const TypeInfo& expected = funcSymbol->paramTypes[idx];
+                llvm::Type* expectedType = expected.kind == SymbolKind::Array
+                    ? typeInfoToLLVMType(expected, ctx.context, true)
+                    : typeInfoToLLVMValueType(expected, ctx.context);
+                argVal = castValueToType(argVal, expectedType, ctx);
+            }
             argsV.push_back(argVal);
+            idx++;
+        }
+    }
+
+    if (funcSymbol->funcDef) {
+        for (auto* captured : funcSymbol->funcDef->captures) {
+            if (!captured) continue;
+            SymbolInfo* callerSymbol = scope->lookup(captured->name);
+            if (!callerSymbol || !callerSymbol->addr) {
+                reportError("捕获变量: " + captured->name + " 在调用点不可用");
+                return nullptr;
+            }
+            argsV.push_back(callerSymbol->addr);
         }
     }
 

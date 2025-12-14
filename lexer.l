@@ -2,6 +2,7 @@
 %option yylineno
 %{
 #include "include/ast.h"
+#include "include/errorReporter.h"
 #include "parser.tab.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +23,7 @@ void updateLocationAndColumn()
 
 letter [a-zA-Z]
 number [0-9]+
+floatnumber (([0-9]+\.[0-9]*)|([0-9]*\.[0-9]+))
 ident {letter}({letter}|[0-9])*
 
 %%
@@ -38,7 +40,9 @@ ident {letter}({letter}|[0-9])*
 "return"    { updateLocationAndColumn(); return RETURN; }
 "null"      { updateLocationAndColumn(); return NULLSIGN; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
+"float"     { updateLocationAndColumn(); return FLOATSIGN; }
 
+{floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }
 {ident}     { updateLocationAndColumn(); yylval.ident = new std::string{ yytext }; return IDENT; }
 
@@ -71,11 +75,8 @@ ident {letter}({letter}|[0-9])*
 "//".*"\n"  { yycolumn = 1; }        // 单行注释也更新列号
 
 .           {
-                fprintf(stderr,
-                "\033[1;31m[词法错误]\033[0m "
-                "未知字符 '%s' 位于 \033[1;33m第 %d 行, 第 %d 列\033[0m\n",
-                yytext, yylineno, yycolumn);
-                hasError = true;
+                std::string msg = std::string{"未知字符 '"} + yytext + "'";
+                reportErrorAt("词法分析", yylineno, yycolumn, msg);
                 yycolumn += yyleng;
                 return yytext[0];
           }

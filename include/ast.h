@@ -23,6 +23,7 @@ struct OutputStmt;
 struct Expr;
 struct BoolExpr;
 struct NumberExpr;
+struct FloatNumberExpr;
 struct UnaryExpr;
 struct BinaryExpr;
 struct IdentExpr;
@@ -37,11 +38,13 @@ class Scope;
 // 类型参数，不是AST节点
 struct TypeInfo
 {
-    SymbolKind kind; // 默认不使用
+    SymbolKind kind; // 类型类别
     std::vector<int> dims; // 数组维度
+    int pointerLevel; // 指针层级
+    bool isFloat; // 是否为浮点类型
 
     TypeInfo();
-    TypeInfo(SymbolKind kind, std::vector<int> dims);
+    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false);
 };
 
 struct CodeGenContext 
@@ -69,9 +72,9 @@ struct ASTNode
     virtual llvm::Value* codeGen(CodeGenContext& ctx) const = 0;
 
     // 当前节点对应的作用域树节点
-    Scope* scope; 
-    int lineno;
-    int column;
+    Scope* scope = nullptr;
+    int lineno = 0;
+    int column = 0;
 
     void reportError(const std::string& msg) const;
 };
@@ -101,6 +104,7 @@ struct Func: public Stmt
     std::unique_ptr<StmtList> stmts;
     std::unique_ptr<Expr> return_value;
     Scope* body_scope;
+    std::vector<SymbolInfo*> captures; // 闭包捕获列表
 
     Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value);
 
@@ -235,10 +239,19 @@ struct BoolExpr: public ASTNode
 };
 
 // 整数常量节点
-struct NumberExpr: public Expr 
+struct NumberExpr: public Expr
 {
     int value;
     NumberExpr(int val);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+struct FloatNumberExpr: public Expr
+{
+    double value;
+    explicit FloatNumberExpr(double val);
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
@@ -253,6 +266,27 @@ struct UnaryExpr: public Expr
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 取地址表达式节点
+struct AddressOfExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    AddressOfExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 解引用表达式节点
+struct DereferenceExpr: public Expr
+{
+    std::unique_ptr<Expr> pointerExpr;
+    DereferenceExpr(std::unique_ptr<Expr> pointerExpr);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+    llvm::Value* getPointerValue(CodeGenContext& ctx) const;
 };
 
 // 二元运算符节点

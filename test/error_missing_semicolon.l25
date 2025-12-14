@@ -1,0 +1,6 @@
+program errorMissingSemicolon {
+    main {
+        let a = 1
+        output(a);
+    }
+}

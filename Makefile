@@ -15,14 +15,14 @@ else
 endif
 
 # 使用 llvm-config 自动获取 LLVM 编译参数，并过滤掉 -std=
-LLVM_CONFIG = llvm-config
+LLVM_CONFIG = llvm-config-18
 LLVM_CXXFLAGS_RAW = $(shell $(LLVM_CONFIG) --cxxflags)
 LLVM_CXXFLAGS = $(filter-out -std=%,$(LLVM_CXXFLAGS_RAW))
 LLVM_LDFLAGS = $(shell $(LLVM_CONFIG) --ldflags)
 LLVM_LIBS = $(shell $(LLVM_CONFIG) --libs)
 
 # 编译器
-CXX = clang++
+CXX = clang++-18
 
 # 基础编译选项
 BASE_CXXFLAGS = -std=c++20 -Wall $(LLVM_CXXFLAGS) -I$(FLEX_INCLUDE)
@@ -37,8 +37,8 @@ all: l25cc
 debug: CXXFLAGS += -g -fsanitize=address -fno-omit-frame-pointer
 debug: l25cc
 
-l25cc: lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o 
-	$(CXX) $(CXXFLAGS) $(LLVM_LDFLAGS) $(LLVM_LIBS) -o l25cc lexer.o parser.o ast.o symbol.o semanticAnalysis.o main.o
+l25cc: lexer.o parser.o ast.o symbol.o semanticAnalysis.o errorReporter.o main.o
+	$(CXX) $(CXXFLAGS) $(LLVM_LDFLAGS) $(LLVM_LIBS) -o l25cc lexer.o parser.o ast.o symbol.o semanticAnalysis.o errorReporter.o main.o
 
 parser.tab.cpp parser.tab.h: parser.y
 	$(BISON) -d -t -v -o parser.tab.cpp parser.y
@@ -60,6 +60,9 @@ symbol.o: symbol.cpp
 
 semanticAnalysis.o: semanticAnalysis.cpp
 	$(CXX) $(CXXFLAGS) -c semanticAnalysis.cpp
+
+errorReporter.o: errorReporter.cpp include/errorReporter.h
+	$(CXX) $(CXXFLAGS) -c errorReporter.cpp
 
 main.o: main.cpp
 	$(CXX) $(CXXFLAGS) -c main.cpp

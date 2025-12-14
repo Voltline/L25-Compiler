@@ -2,6 +2,7 @@
 %define parse.error verbose
 %{
 #include "include/ast.h"
+#include "include/errorReporter.h"
 #include "include/symbol.h"
 #include <memory>
 #include <cstdio>
@@ -15,20 +16,17 @@ extern char* yytext;
 extern bool hasError;
 
 int yylex();
-void yyerror(const char* s) 
+void yyerror(const char* s)
 {
-    fprintf(stderr,
-        "\033[1;31m[语法错误]\033[0m "
-        "位于 \033[1;33m第 %d 行, 第 %d 列\033[0m: %s "
-        "(near \033[1;34m'%s'\033[0m)\n",
-        yylineno, yycolumn, s, yytext);
-    hasError = true;
+    std::string msg = std::string{s} + " (near '" + yytext + "')";
+    reportErrorAt("语法分析", yylineno, yycolumn, msg);
 }
 extern Program* rootProgram;
 %}
 
 %union {
     int num;
+    double fnum;
     std::string* ident;
     Expr* expr;
     ParamList* paramList; // 函数定义
@@ -71,6 +69,9 @@ extern Program* rootProgram;
 %type <expr> expr
 %type <expr> term
 %type <expr> factor
+%type <expr> deref_expr
+%type <expr> addr_expr
+%type <expr> assignable
 %type <expr> array_subscript_expr
 %type <arraySubscriptList> array_subscript_list
 
@@ -78,11 +79,13 @@ extern Program* rootProgram;
 
 %type <dims> dim_list
 %type <typeInfo> type_info
+%type <typeInfo> base_type
 
 %token <num> NUMBER
+%token <fnum> FLOATNUMBER
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN FLOATSIGN
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
@@ -272,23 +275,32 @@ declare_stmt:
     ;
 
 assign_stmt:
-    IDENT ASSIGN expr
+    assignable ASSIGN expr
     {
         $$ = new AssignStmt{
-            std::make_unique<IdentExpr>(*$1),
+            std::unique_ptr<Expr>($1),
             std::unique_ptr<Expr>($3)
         };
         $$->lineno = @2.first_line;
         $$->column = @2.first_column;
     }
-    | array_subscript_expr ASSIGN expr
+    ;
+
+assignable:
+    IDENT
     {
-        $$ = new AssignStmt{
-            std::make_unique<ArraySubscriptExpr>(std::move(static_cast<ArraySubscriptExpr*>($1)->array), std::move(static_cast<ArraySubscriptExpr*>($1)->subscript)),
-            std::unique_ptr<Expr>($3)
-        };
-        $$->lineno = @2.first_line;
-        $$->column = @2.first_column;
+        $$ = new IdentExpr(*$1);
+        delete $1;
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | array_subscript_expr
+    {
+        $$ = $1;
+    }
+    | deref_expr
+    {
+        $$ = $1;
     }
     ;
 
@@ -500,12 +512,26 @@ factor:
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }
+    | FLOATNUMBER
+    {
+        $$ = new FloatNumberExpr($1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     | IDENT
     {
         $$ = new IdentExpr(*$1);
         delete $1;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+    }
+    | addr_expr
+    {
+        $$ = $1;
+    }
+    | deref_expr
+    {
+        $$ = $1;
     }
     | LPAREN expr RPAREN
     {
@@ -520,6 +546,24 @@ factor:
     | array_subscript_expr
     {
         $$ = $1;
+    }
+    ;
+
+addr_expr:
+    ANDSIGN factor %prec DEREF
+    {
+        $$ = new AddressOfExpr(std::unique_ptr<Expr>($2));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    ;
+
+deref_expr:
+    STAR factor %prec DEREF
+    {
+        $$ = new DereferenceExpr(std::unique_ptr<Expr>($2));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -563,14 +607,41 @@ dim_list:
     ;
 
 type_info:
-    INTSIGN
+    base_type
     {
-        $$ = new TypeInfo{ SymbolKind::Int, {} };
+        $$ = $1;
     }
     |
     LBRACKET dim_list RBRACKET
     {
-        $$ = new TypeInfo{ SymbolKind::Array, *$2 };
+        $$ = new TypeInfo{ SymbolKind::Array, *$2, 0, false };
+        delete $2;
+    }
+    |
+    LBRACKET dim_list RBRACKET base_type
+    {
+        $$ = new TypeInfo{ SymbolKind::Array, *$2, 0, $4->isFloat };
+        delete $2;
+        delete $4;
+    }
+    | STAR type_info %prec DEREF
+    {
+        $$ = new TypeInfo(*$2);
+        $$->pointerLevel += 1;
+        if ($$->kind == SymbolKind::Int || $$->kind == SymbolKind::Pointer || $$->kind == SymbolKind::Float) {
+            $$->kind = SymbolKind::Pointer;
+        }
+    }
+    ;
+
+base_type:
+    INTSIGN
+    {
+        $$ = new TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    | FLOATSIGN
+    {
+        $$ = new TypeInfo{ SymbolKind::Float, {}, 0, true };
     }
     ;
 %%

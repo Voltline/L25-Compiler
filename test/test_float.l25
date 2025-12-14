@@ -1,0 +1,21 @@
+program floatdemo {
+    func toint(v: float) {
+        let tmp: float;
+        tmp = v;
+        return v;
+    }
+
+    main {
+        let x: float;
+        let y: float;
+        let arr: [2] float;
+
+        x = 1.5;
+        y = x + 2;
+        arr[0] = x;
+        arr[1] = y * 2.0;
+
+        output(x, y, arr[0], arr[1]);
+        output(toint(y), y - 0.5, 3 / 2);
+    }
+}
