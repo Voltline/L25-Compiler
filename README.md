@@ -31,6 +31,27 @@ func f1(a) {
 ```
 &emsp; 💡 Although nested functions are allowed, inner functions **cannot access symbols in the outer scope**.
 
+* 🎯 *Typed return values with concise arrow syntax*:
+```L25
+func add(a: int, b: float) -> float {
+    return a + b;
+}
+
+func legacy(a) { // no arrow still defaults to int
+    return a + 1;
+}
+```
+&emsp; Functions and methods default to returning `int` when the `-> <type>` clause is omitted.
+
+* 🌑 *Explicit null pointers via `nil`*:
+```L25
+let p: *int = nil;
+if (p == nil) {
+    output(0);
+};
+```
+&emsp; Literal `0` remains usable as a null pointer, but the compiler will emit a warning recommending `nil` when it is assigned to pointer-typed slots.
+
 * 🧮 *Definition and Invocation of Multidimensional Arrays*:
 ```L25
 ... 
@@ -46,22 +67,6 @@ let a: int;
 let b: int = 10;
 let c = 20;
 let d: [3, 4];
-```
-
-* 🔐 *Every statement-list has `at least one statement`*:
-```L25
-// ✅ Right Example
-func rightFunc(a, b)
-{
-    let res = a + b; // ✅ At least one statement
-    return res;
-}
-
-// ❌ Wrong Example
-func wrongFunc(a, b)
-{
-    return a + b; // ❌ No statement is not allowed.
-}
 ```
 
 * 🔚 *Every statement ends with `semicolon`*:
@@ -137,6 +142,20 @@ program class_method {
 }
 ```
 
+* 🧾 *Procedures without explicit return values*:
+```L25
+func log_message(msg) {
+    output(msg);
+    // The function returns 0 implicitly.
+}
+
+program demo {
+    main {
+        log_message(123);
+    }
+}
+```
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -202,6 +221,65 @@ program nestedFuncCall {
 }
 ```
 
+* 📦 Singly Linked List with Constructors/Destructors:
+```L25
+program linked_list {
+    class Node {
+        let value: int;
+        let next: *Node;
+
+        Node(v) {
+            this.value = v;
+            this.next = 0;
+        }
+
+        ~Node() {}
+    }
+
+    class List {
+        let head: *Node;
+
+        List() { this.head = 0; }
+        ~List() {
+            let cur: *Node; cur = this.head;
+            while (cur != 0) {
+                let nxt: *Node; nxt = cur.next;
+                cur.next = 0; // avoid cascading deletion
+                delete cur;
+                cur = nxt;
+            };
+        }
+
+        func push_back(v) {
+            let n: *Node;
+            n = new Node(v);
+            if (this.head == 0) { this.head = n; }
+            else {
+                let cur: *Node; cur = this.head;
+                while (cur.next != 0) { cur = cur.next; };
+                cur.next = n;
+            };
+        }
+
+        func print() {
+            let cur: *Node; cur = this.head;
+            while (cur != 0) {
+                output(cur.value);
+                cur = cur.next;
+            };
+        }
+    }
+
+    main {
+        let list: *List;
+        list = new List();
+        list.push_back(1); list.push_back(2); list.push_back(3);
+        list.print();
+        delete list; // iteratively releases every node
+    }
+}
+```
+
 ## 🎨 Visual Studio Code Extensions
 
 > ✨ A syntax highlighting & code snippets extension for VSCode
@@ -236,20 +314,26 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 <class_member> =
       <field_decl>
     | <method_def>
+    | <ctor_def>
 
 <field_decl> =
     "let" <ident> ":" <type_info> ";"
 
 <method_def> =
-    "func" <ident> "(" [ <param_list> ] ")" "{"
+    "func" <ident> "(" [ <param_list> ] ")" [ "->" <type_info> ] "{"
         <stmt_list>
-        "return" <expr> ";"
+        [ "return" <expr> ";" ]
+    "}"
+
+<ctor_def> =
+    <ident> "(" [ <param_list> ] ")" "{"
+        <stmt_list>
     "}"
 
 <func_def> =
-    "func" <ident> "(" [ <param_list> ] ")" "{"
+    "func" <ident> "(" [ <param_list> ] ")" [ "->" <type_info> ] "{"
         <stmt_list>
-        "return" <expr> ";"
+        [ "return" <expr> ";" ]
     "}"
 
 <param_list> =
@@ -259,7 +343,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     <ident> [ ":" <type_info> ]
 
 <stmt_list> =
-    <stmt> ";" { <stmt> ";" }
+    { <stmt> ";" }
 
 <stmt> =
       <declare_stmt>
@@ -380,6 +464,10 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     "0" | "1" | ... | "9"
 
 ```
+
+Constructors share the class name and can be defined with any parameter list. The `new ClassName(...)` expression allocates an instance on the heap, resolves a constructor by matching the argument count, and returns a pointer to the class type. Declare the receiving variable accordingly (for example, `let p: *Point = new Point(1, 2);`). If no constructor exists and no arguments are provided, the runtime zero-initializes the allocated storage instead.
+
+Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use the `delete <expr>;` statement to destroy a heap object: it first checks for null, invokes the destructor if present, and then releases the memory. Pair every `new` with a corresponding `delete` to avoid leaks because automatic garbage collection is not available yet.
 
 ## ⚠️ Notes & Limitations
 - `this` can only be used inside class methods.

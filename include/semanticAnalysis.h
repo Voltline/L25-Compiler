@@ -19,6 +19,7 @@ private:
     void analyzeClass(ClassDecl& cls);
     void analyzeMethod(MethodDecl& method);
     void analyzeCtor(CtorDecl& ctor);
+    void analyzeDtor(DtorDecl& dtor);
 
     void analyzeProgram(Program& program);
     void analyzeFunc(Func& func);

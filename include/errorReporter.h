@@ -10,5 +10,9 @@ bool loadSourceFile(const std::string& filename);
 void reportErrorAt(const std::string& category, int lineno, int column, const std::string& msg);
 void reportErrorAt(const ASTNode& node, const std::string& category, const std::string& msg);
 
+// 警告输出，不会中断编译
+void reportWarningAt(const std::string& category, int lineno, int column, const std::string& msg);
+void reportWarningAt(const ASTNode& node, const std::string& category, const std::string& msg);
+
 // 当前源文件名，若尚未设置则为空
 const std::string& currentSourceFile();

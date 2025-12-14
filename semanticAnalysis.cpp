@@ -3,6 +3,30 @@
 #include <algorithm>
 extern bool hasError;
 
+namespace {
+
+bool isPointerLike(const TypeInfo& type)
+{
+    return type.pointerLevel > 0 || type.kind == SymbolKind::Pointer || (type.kind == SymbolKind::Class && type.pointerLevel > 0);
+}
+
+bool isZeroLiteral(const Expr* expr)
+{
+    if (auto num = dynamic_cast<const NumberExpr*>(expr)) {
+        return num->value == 0;
+    }
+    return false;
+}
+
+void warnZeroAsNil(const ASTNode& node, const TypeInfo& targetType, const Expr* expr)
+{
+    if (expr && isPointerLike(targetType) && isZeroLiteral(expr)) {
+        reportWarningAt(node, "语义分析", "建议使用 nil 表示空指针，而非 0");
+    }
+}
+
+} // namespace
+
 /* SemanticAnalyzer 方法定义 */
 // Public
 void SemanticAnalyzer::analyze(Program& program)
@@ -33,6 +57,7 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
         for (const auto& field : cls->fields) {
             classInfo.classFields.emplace_back(field->name->ident, field->type);
         }
+        classInfo.hasDestructor = static_cast<bool>(cls->dtor);
         for (const auto& method : cls->methods) {
             std::vector<TypeInfo> params;
             if (method->params) {
@@ -41,9 +66,11 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
                 }
             }
             classInfo.methodParamTypes[method->name->ident] = params;
+            classInfo.methodReturnTypes[method->name->ident] = method->returnType;
         }
         declareSymbol(className, classInfo);
         classFieldLayouts[className] = classInfo.classFields;
+        classMethodReturnTypes[className] = classInfo.methodReturnTypes;
         classDecls[className] = cls.get();
     }
 
@@ -90,7 +117,10 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
     for (const auto& stmt: func.stmts->stmts) {
         analyzeStmt(*stmt);
     }
-    analyzeExpr(*func.return_value);
+    if (func.return_value) {
+        analyzeExpr(*func.return_value);
+        warnZeroAsNil(func, func.returnType, func.return_value.get());
+    }
     funcStack.pop_back();
     exitScope();
 }
@@ -115,6 +145,13 @@ void SemanticAnalyzer::analyzeClass(ClassDecl& cls)
         analyzeCtor(*ctor);
     }
 
+    if (cls.dtor) {
+        if (cls.dtor->name->ident != cls.name->ident) {
+            reportError(*cls.dtor, "析构函数名称必须与类名一致");
+        }
+        analyzeDtor(*cls.dtor);
+    }
+
     // 方法
     for (auto& method : cls.methods) {
         analyzeMethod(*method);
@@ -127,6 +164,7 @@ void SemanticAnalyzer::analyzeCtor(CtorDecl& ctor)
 {
     ctor.scope = currentScope;
     enterScope();
+    ctor.bodyScope = currentScope;
     if (currentClass) {
         TypeInfo thisType{ SymbolKind::Class, {}, 1, false, currentClass->name->ident };
         SymbolInfo thisInfo{ "this", thisType };
@@ -140,6 +178,25 @@ void SemanticAnalyzer::analyzeCtor(CtorDecl& ctor)
     }
     if (ctor.body) {
         for (const auto& stmt : ctor.body->stmts) {
+            analyzeStmt(*stmt);
+        }
+    }
+    exitScope();
+}
+
+void SemanticAnalyzer::analyzeDtor(DtorDecl& dtor)
+{
+    dtor.scope = currentScope;
+    enterScope();
+    dtor.bodyScope = currentScope;
+    if (currentClass) {
+        TypeInfo thisType{ SymbolKind::Class, {}, 1, false, currentClass->name->ident };
+        SymbolInfo thisInfo{ "this", thisType };
+        declareSymbol("this", thisInfo);
+    }
+
+    if (dtor.body) {
+        for (const auto& stmt : dtor.body->stmts) {
             analyzeStmt(*stmt);
         }
     }
@@ -169,6 +226,7 @@ void SemanticAnalyzer::analyzeMethod(MethodDecl& method)
     }
     if (method.return_value) {
         analyzeExpr(*method.return_value);
+        warnZeroAsNil(method, method.returnType, method.return_value.get());
     }
     exitScope();
 }
@@ -185,6 +243,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         }
         if (decl->expr) {
             analyzeExpr(*decl->expr);
+            warnZeroAsNil(*decl, decl->name->type, decl->expr.get());
         }
     } else if (auto assign = dynamic_cast<const AssignStmt*>(&stmt)) {
         if (auto normalVarAssign = dynamic_cast<const IdentExpr*>(assign->name.get())) {
@@ -193,6 +252,10 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
                 return;
             }
             analyzeExpr(*assign->expr);
+            SymbolInfo* target = currentScope->lookup(normalVarAssign->ident);
+            if (target) {
+                warnZeroAsNil(*assign, TypeInfo{ target->kind, target->dimensions, target->pointerLevel, target->isFloat, target->className }, assign->expr.get());
+            }
         } else if (auto arrayAssign = dynamic_cast<ArraySubscriptExpr*>(assign->name.get())) {
             if (!checkSymbolExists(arrayAssign->array->ident)) {
                 reportError(*arrayAssign, "变量未声明：" + arrayAssign->array->ident);
@@ -265,6 +328,16 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
     } else if (auto outputStmt = dynamic_cast<const OutputStmt*>(&stmt)) {
         for (const auto& expr: outputStmt->idents) {
             analyzeExpr(*expr);
+        }
+    } else if (auto deleteStmt = dynamic_cast<const DeleteStmt*>(&stmt)) {
+        if (deleteStmt->target) {
+            analyzeExpr(*deleteStmt->target);
+            TypeInfo type = evaluateExprType(deleteStmt->target.get());
+            if (type.kind != SymbolKind::Class || type.pointerLevel <= 0) {
+                reportError(*deleteStmt, "delete 目标必须是类指针");
+            } else if (classDecls.find(type.className) == classDecls.end()) {
+                reportError(*deleteStmt, "未知的类：" + type.className);
+            }
         }
     } else if (auto funcDefStmt = dynamic_cast<Func*>(&stmt)) {
         const std::string& funcName = funcDefStmt->name->ident;
@@ -341,8 +414,12 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
                     return;
             }
             // TODO: 加上参数对应类型检查，这里还有数组传入的问题
-            for (const auto& expr: funcCallExpr->args->args) {
+            for (size_t i = 0; i < funcCallExpr->args->args.size(); ++i) {
+                const auto& expr = funcCallExpr->args->args[i];
                 analyzeExpr(*expr);
+                if (i < funcSymbol->paramTypes.size()) {
+                    warnZeroAsNil(*funcCallExpr, funcSymbol->paramTypes[i], expr.get());
+                }
             }
         }
     } else if (auto subscript = dynamic_cast<const ArraySubscriptExpr*>(&expr)) {
@@ -425,7 +502,37 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             reportError(*methodCall, "方法参数数量不匹配");
         }
         if (methodCall->args) {
-            for (const auto& arg : methodCall->args->args) {
+            for (size_t i = 0; i < methodCall->args->args.size(); ++i) {
+                const auto& arg = methodCall->args->args[i];
+                analyzeExpr(*arg);
+                if (i < paramTypes.size()) {
+                    warnZeroAsNil(*methodCall, paramTypes[i], arg.get());
+                }
+            }
+        }
+    } else if (auto newExpr = dynamic_cast<const NewExpr*>(&expr)) {
+        const std::string className = newExpr->className->ident;
+        auto clsIt = classDecls.find(className);
+        if (clsIt == classDecls.end()) {
+            reportError(*newExpr, "未知的类：" + className);
+            return;
+        }
+
+        size_t argCount = newExpr->args ? newExpr->args->args.size() : 0;
+        bool hasMatchingCtor = false;
+        for (const auto& ctor : clsIt->second->ctors) {
+            size_t paramCount = ctor->params ? ctor->params->params.size() : 0;
+            if (paramCount == argCount) {
+                hasMatchingCtor = true;
+                break;
+            }
+        }
+        if (argCount > 0 && !hasMatchingCtor) {
+            reportError(*newExpr, "未找到匹配参数数量的构造函数");
+        }
+
+        if (newExpr->args) {
+            for (const auto& arg : newExpr->args->args) {
                 analyzeExpr(*arg);
             }
         }

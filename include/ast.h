@@ -43,19 +43,6 @@ struct TypeInfo;
 enum class SymbolKind;
 class Scope;
 
-// 类型参数，不是AST节点
-struct TypeInfo
-{
-    SymbolKind kind; // 类型类别
-    std::vector<int> dims; // 数组维度
-    int pointerLevel; // 指针层级
-    bool isFloat; // 是否为浮点类型
-    std::string className; // 类名（仅用于类/类指针类型）
-
-    TypeInfo();
-    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false, std::string className = "");
-};
-
 struct CodeGenContext
 {
     llvm::LLVMContext& context;
@@ -73,6 +60,7 @@ struct CodeGenContext
 
 extern std::unordered_map<std::string, llvm::StructType*> classStructTypes;
 extern std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
+extern std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
 TypeInfo evaluateExprType(const Expr* expr);
 
 // AST节点基类
@@ -132,8 +120,23 @@ struct CtorDecl: public ASTNode
     std::unique_ptr<IdentExpr> name;
     std::unique_ptr<ParamList> params;
     std::unique_ptr<StmtList> body;
+    Scope* bodyScope = nullptr;
 
     CtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 析构函数声明
+struct DtorDecl: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<StmtList> body;
+    Scope* bodyScope = nullptr;
+
+    DtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<StmtList> body);
 
     void print(int indent = 0) const override;
 
@@ -147,9 +150,10 @@ struct MethodDecl: public ASTNode
     std::unique_ptr<ParamList> params;
     std::unique_ptr<StmtList> body;
     std::unique_ptr<Expr> return_value;
+    TypeInfo returnType;
     Scope* bodyScope = nullptr;
 
-    MethodDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body, std::unique_ptr<Expr> return_value);
+    MethodDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body, std::unique_ptr<Expr> return_value, TypeInfo returnType = TypeInfo{ SymbolKind::Int, {} });
 
     void print(int indent = 0) const override;
 
@@ -164,12 +168,14 @@ struct ClassDecl: public ASTNode
     std::vector<std::unique_ptr<FieldDecl>> fields;
     std::vector<std::unique_ptr<MethodDecl>> methods;
     std::vector<std::unique_ptr<CtorDecl>> ctors;
+    std::unique_ptr<DtorDecl> dtor;
 
     ClassDecl(std::unique_ptr<IdentExpr> name,
               std::unique_ptr<IdentExpr> baseClass,
               std::vector<std::unique_ptr<FieldDecl>> fields,
               std::vector<std::unique_ptr<MethodDecl>> methods,
-              std::vector<std::unique_ptr<CtorDecl>> ctors);
+              std::vector<std::unique_ptr<CtorDecl>> ctors,
+              std::unique_ptr<DtorDecl> dtor = nullptr);
 
     void print(int indent = 0) const override;
 
@@ -183,10 +189,11 @@ struct Func: public Stmt
     std::unique_ptr<ParamList> params; // Nullable
     std::unique_ptr<StmtList> stmts;
     std::unique_ptr<Expr> return_value;
+    TypeInfo returnType;
     Scope* body_scope;
     std::vector<SymbolInfo*> captures; // 闭包捕获列表
 
-    Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value);
+    Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> stmts, std::unique_ptr<Expr> return_value, TypeInfo returnType = TypeInfo{ SymbolKind::Int, {} });
 
     void print(int indent = 0) const override;
 
@@ -301,6 +308,18 @@ struct OutputStmt: public Stmt
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
+// delete 语句
+struct DeleteStmt: public Stmt
+{
+    std::unique_ptr<Expr> target;
+
+    explicit DeleteStmt(std::unique_ptr<Expr> target);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
 // 表达式节点
 struct Expr: public ASTNode {};
 
@@ -334,6 +353,12 @@ struct FloatNumberExpr: public Expr
     explicit FloatNumberExpr(double val);
     void print(int indent = 0) const override;
 
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+struct NilExpr: public Expr
+{
+    void print(int indent = 0) const override;
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 

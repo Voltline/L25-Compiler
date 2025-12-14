@@ -1,5 +1,7 @@
 %locations
 %define parse.error verbose
+%define lr.type ielr
+%glr-parser
 %code requires {
 #include "include/ast.h"
 struct ClassMemberAggregate;
@@ -13,6 +15,7 @@ struct ClassMemberAggregate;
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <algorithm>
 #include <iterator>
 extern int yydebug;
 extern int yylineno;
@@ -31,6 +34,7 @@ struct ClassMemberAggregate {
     std::vector<std::unique_ptr<FieldDecl>> fields;
     std::vector<std::unique_ptr<MethodDecl>> methods;
     std::vector<std::unique_ptr<CtorDecl>> ctors;
+    std::unique_ptr<DtorDecl> dtor;
 };
 extern Program* rootProgram;
 %}
@@ -51,6 +55,7 @@ extern Program* rootProgram;
     FieldDecl* fieldDecl;
     MethodDecl* methodDecl;
     CtorDecl* ctorDecl;
+    DtorDecl* dtorDecl;
     ClassMemberAggregate* classMembers;
     BoolExpr* boolExpr;
     ArgList* argList; // 函数调用与output共用
@@ -68,12 +73,14 @@ extern Program* rootProgram;
 
 %type <func> func
 %type <funcList> func_def_list
+%type <typeInfo> opt_return_type
 %type <classDecl> class_def
 %type <classList> class_def_list opt_class_def_list
 %type <classMembers> class_member_list class_member
 %type <fieldDecl> field_decl
 %type <methodDecl> method_decl
 %type <ctorDecl> ctor_decl
+%type <dtorDecl> dtor_decl
 %type <paramList> param_list
 %type <argList> arg_list
 %type <inputArgList> input_arg_list
@@ -97,6 +104,7 @@ extern Program* rootProgram;
 %type <expr> assignable
 %type <expr> array_subscript_expr
 %type <arraySubscriptList> array_subscript_list
+%type <expr> opt_return
 
 %type <boolExpr> bool_expr
 
@@ -108,8 +116,9 @@ extern Program* rootProgram;
 %token <fnum> FLOATNUMBER
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN FLOATSIGN CLASS EXTENDS THIS NEW
-%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN CLASS EXTENDS THIS NEW DELETE
+%token ARROW
+%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
 %left STAR DIVIDE
@@ -179,13 +188,13 @@ class_def_list
 class_def:
     CLASS IDENT LBRACE class_member_list RBRACE
     {
-        $$ = new ClassDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::move($4->fields), std::move($4->methods), std::move($4->ctors));
+        $$ = new ClassDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::move($4->fields), std::move($4->methods), std::move($4->ctors), std::move($4->dtor));
         delete $2;
         delete $4;
     }
     | CLASS IDENT EXTENDS IDENT LBRACE class_member_list RBRACE
     {
-        $$ = new ClassDecl(std::make_unique<IdentExpr>(*$2), std::make_unique<IdentExpr>(*$4), std::move($6->fields), std::move($6->methods), std::move($6->ctors));
+        $$ = new ClassDecl(std::make_unique<IdentExpr>(*$2), std::make_unique<IdentExpr>(*$4), std::move($6->fields), std::move($6->methods), std::move($6->ctors), std::move($6->dtor));
         delete $2;
         delete $4;
         delete $6;
@@ -203,6 +212,11 @@ class_member_list
         $$->fields.reserve($$->fields.size() + $2->fields.size());
         $$->methods.reserve($$->methods.size() + $2->methods.size());
         $$->ctors.reserve($$->ctors.size() + $2->ctors.size());
+        if ($2->dtor && $$->dtor) {
+            reportErrorAt("语法分析", @1.first_line, @1.first_column, "析构函数重复定义");
+        } else if ($2->dtor) {
+            $$->dtor = std::move($2->dtor);
+        }
         std::move($2->fields.begin(), $2->fields.end(), std::back_inserter($$->fields));
         std::move($2->methods.begin(), $2->methods.end(), std::back_inserter($$->methods));
         std::move($2->ctors.begin(), $2->ctors.end(), std::back_inserter($$->ctors));
@@ -226,6 +240,11 @@ class_member
         $$ = new ClassMemberAggregate();
         $$->ctors.push_back(std::unique_ptr<CtorDecl>($1));
     }
+    | dtor_decl
+    {
+        $$ = new ClassMemberAggregate();
+        $$->dtor.reset($1);
+    }
     ;
 
 field_decl
@@ -240,19 +259,21 @@ field_decl
     ;
 
 method_decl
-    : FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    : FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $2;
+        delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $2;
+        delete $5;
     }
     ;
 
@@ -273,33 +294,69 @@ ctor_decl
     }
     ;
 
-func:
-    FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+dtor_decl
+    : TILDE IDENT LPAREN RPAREN LBRACE stmt_list RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+        $$ = new DtorDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<StmtList>($6));
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $2;
     }
-    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    ;
+
+func:
+    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $6;
+    }
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    {
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $5;
     }
     ;
 
 nested_func_stmt:
-    FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $5;
+    }
+    ;
+
+opt_return:
+    RETURN expr SEMICOLON
+    {
+        $$ = $2;
+    }
+    |
+    {
+        $$ = nullptr;
+    }
+    ;
+
+opt_return_type:
+    /* empty */
+    {
+        $$ = new TypeInfo{ SymbolKind::Int, {} };
+    }
+    | ARROW type_info
+    {
+        $$ = $2;
     }
     ;
 
@@ -367,17 +424,18 @@ stmt:
     {
         $$ = $1;
     }
+    | DELETE expr
+    {
+        $$ = new DeleteStmt(std::unique_ptr<Expr>($2));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     ;
 
 stmt_list:
     /* empty */
     {
         $$ = new StmtList(std::vector<std::unique_ptr<Stmt>>());
-    }
-    | stmt SEMICOLON
-    {
-        $$ = new StmtList(std::vector<std::unique_ptr<Stmt>>());
-        $$->stmts.push_back(std::unique_ptr<Stmt>($1));
     }
     | stmt_list stmt SEMICOLON
     {
@@ -673,6 +731,12 @@ factor:
     | FLOATNUMBER
     {
         $$ = new FloatNumberExpr($1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | NIL
+    {
+        $$ = new NilExpr();
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }

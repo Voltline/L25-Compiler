@@ -71,3 +71,19 @@ void reportErrorAt(const ASTNode& node, const std::string& category, const std::
     reportErrorAt(category, node.lineno, node.column, msg);
 }
 
+void reportWarningAt(const std::string& category, int lineno, int column, const std::string& msg)
+{
+    std::string filename = gCurrentFile.empty() ? std::string{"<未知文件>"} : gCurrentFile;
+    int safeLine = std::max(lineno, 1);
+    int safeColumn = std::max(column, 1);
+
+    std::cerr << filename << ':' << safeLine << ':' << safeColumn << ": "
+              << "\033[1;33mwarning\033[0m: [" << category << "] " << msg << std::endl;
+    printSourceContext(safeLine, safeColumn);
+}
+
+void reportWarningAt(const ASTNode& node, const std::string& category, const std::string& msg)
+{
+    reportWarningAt(category, node.lineno, node.column, msg);
+}
+

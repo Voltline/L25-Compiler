@@ -42,7 +42,9 @@ ident {letter}({letter}|[0-9])*
 "return"    { updateLocationAndColumn(); return RETURN; }
 "this"      { updateLocationAndColumn(); return THIS; }
 "new"       { updateLocationAndColumn(); return NEW; }
-"null"      { updateLocationAndColumn(); return NULLSIGN; }
+"delete"    { updateLocationAndColumn(); return DELETE; }
+"nil"       { updateLocationAndColumn(); return NIL; }
+"null"      { updateLocationAndColumn(); return NIL; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
 "float"     { updateLocationAndColumn(); return FLOATSIGN; }
 
@@ -63,6 +65,7 @@ ident {letter}({letter}|[0-9])*
 "*"         { updateLocationAndColumn(); return STAR; }
 "/"         { updateLocationAndColumn(); return DIVIDE; }
 "%"         { updateLocationAndColumn(); return MOD; }
+"~"         { updateLocationAndColumn(); return TILDE; }
 
 "("         { updateLocationAndColumn(); return LPAREN; }
 ")"         { updateLocationAndColumn(); return RPAREN; }
@@ -71,6 +74,7 @@ ident {letter}({letter}|[0-9])*
 "["         { updateLocationAndColumn(); return LBRACKET; }
 "]"         { updateLocationAndColumn(); return RBRACKET; }
 ":"         { updateLocationAndColumn(); return COLON; }
+"->"        { updateLocationAndColumn(); return ARROW; }
 ";"         { updateLocationAndColumn(); return SEMICOLON; }
 ","         { updateLocationAndColumn(); return COMMA; }
 "."         { updateLocationAndColumn(); return DOT; }
