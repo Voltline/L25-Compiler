@@ -21,16 +21,18 @@ void updateLocationAndColumn()
 }
 %}
 
-letter [a-zA-Z]
+letter [a-zA-Z_]
 number [0-9]+
 floatnumber (([0-9]+\.[0-9]*)|([0-9]*\.[0-9]+))
 ident {letter}({letter}|[0-9])*
 
 %%
 
-"program"   { updateLocationAndColumn(); return PROGRAM; } 
+"program"   { updateLocationAndColumn(); return PROGRAM; }
 "func"      { updateLocationAndColumn(); return FUNC; }
 "main"      { updateLocationAndColumn(); return MAIN; }
+"class"     { updateLocationAndColumn(); return CLASS; }
+"extends"   { updateLocationAndColumn(); return EXTENDS; }
 "let"       { updateLocationAndColumn(); return LET; }
 "if"        { updateLocationAndColumn(); return IF; }
 "else"      { updateLocationAndColumn(); return ELSE; }
@@ -38,6 +40,8 @@ ident {letter}({letter}|[0-9])*
 "input"     { updateLocationAndColumn(); return INPUT; }
 "output"    { updateLocationAndColumn(); return OUTPUT; }
 "return"    { updateLocationAndColumn(); return RETURN; }
+"this"      { updateLocationAndColumn(); return THIS; }
+"new"       { updateLocationAndColumn(); return NEW; }
 "null"      { updateLocationAndColumn(); return NULLSIGN; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
 "float"     { updateLocationAndColumn(); return FLOATSIGN; }
@@ -69,6 +73,7 @@ ident {letter}({letter}|[0-9])*
 ":"         { updateLocationAndColumn(); return COLON; }
 ";"         { updateLocationAndColumn(); return SEMICOLON; }
 ","         { updateLocationAndColumn(); return COMMA; }
+"."         { updateLocationAndColumn(); return DOT; }
 
 [ \t]+      { yycolumn += yyleng; }       // 空格和 Tab 只更新列号
 \n          { yycolumn = 1; }  // 换行时更新行号，重置列号

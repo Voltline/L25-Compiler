@@ -1,5 +1,10 @@
 %locations
 %define parse.error verbose
+%code requires {
+#include "include/ast.h"
+struct ClassMemberAggregate;
+}
+
 %{
 #include "include/ast.h"
 #include "include/errorReporter.h"
@@ -8,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <iterator>
 extern int yydebug;
 extern int yylineno;
 extern int yycolumn;
@@ -21,6 +27,11 @@ void yyerror(const char* s)
     std::string msg = std::string{s} + " (near '" + yytext + "')";
     reportErrorAt("语法分析", yylineno, yycolumn, msg);
 }
+struct ClassMemberAggregate {
+    std::vector<std::unique_ptr<FieldDecl>> fields;
+    std::vector<std::unique_ptr<MethodDecl>> methods;
+    std::vector<std::unique_ptr<CtorDecl>> ctors;
+};
 extern Program* rootProgram;
 %}
 
@@ -35,6 +46,12 @@ extern Program* rootProgram;
     Func* func;
     Program* program;
     std::vector<std::unique_ptr<Func>>* funcList;
+    ClassDecl* classDecl;
+    std::vector<std::unique_ptr<ClassDecl>>* classList;
+    FieldDecl* fieldDecl;
+    MethodDecl* methodDecl;
+    CtorDecl* ctorDecl;
+    ClassMemberAggregate* classMembers;
     BoolExpr* boolExpr;
     ArgList* argList; // 函数调用与output共用
     FuncCallStmt* funcCallStmt;
@@ -51,6 +68,12 @@ extern Program* rootProgram;
 
 %type <func> func
 %type <funcList> func_def_list
+%type <classDecl> class_def
+%type <classList> class_def_list opt_class_def_list
+%type <classMembers> class_member_list class_member
+%type <fieldDecl> field_decl
+%type <methodDecl> method_decl
+%type <ctorDecl> ctor_decl
 %type <paramList> param_list
 %type <argList> arg_list
 %type <inputArgList> input_arg_list
@@ -85,11 +108,12 @@ extern Program* rootProgram;
 %token <fnum> FLOATNUMBER
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN FLOATSIGN
-%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN FLOATSIGN CLASS EXTENDS THIS NEW
+%token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
 %left STAR DIVIDE
+%left DOT
 
 %token UPLUS UMINUS DEREF
 %right UPLUS UMINUS
@@ -97,19 +121,21 @@ extern Program* rootProgram;
 
 %%
 input:
-    PROGRAM IDENT LBRACE MAIN LBRACE stmt_list RBRACE RBRACE
+    PROGRAM IDENT LBRACE opt_class_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
-        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($6));
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($7));
         rootProgram = $$;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $4;
     }
-    | PROGRAM IDENT LBRACE func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    | PROGRAM IDENT LBRACE opt_class_def_list func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
-        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::unique_ptr<StmtList>($7));
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::move(*$5), std::unique_ptr<StmtList>($8));
         rootProgram = $$;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+        delete $4;
     }
     ;
 
@@ -123,6 +149,127 @@ func_def_list
     {
         $$ = $1;
         $$->push_back(std::unique_ptr<Func>($2));
+    }
+    ;
+
+opt_class_def_list
+    :
+    {
+        $$ = new std::vector<std::unique_ptr<ClassDecl>>();
+    }
+    | class_def_list
+    {
+        $$ = $1;
+    }
+    ;
+
+class_def_list
+    : class_def
+    {
+        $$ = new std::vector<std::unique_ptr<ClassDecl>>();
+        $$->push_back(std::unique_ptr<ClassDecl>($1));
+    }
+    | class_def_list class_def
+    {
+        $$ = $1;
+        $$->push_back(std::unique_ptr<ClassDecl>($2));
+    }
+    ;
+
+class_def:
+    CLASS IDENT LBRACE class_member_list RBRACE
+    {
+        $$ = new ClassDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::move($4->fields), std::move($4->methods), std::move($4->ctors));
+        delete $2;
+        delete $4;
+    }
+    | CLASS IDENT EXTENDS IDENT LBRACE class_member_list RBRACE
+    {
+        $$ = new ClassDecl(std::make_unique<IdentExpr>(*$2), std::make_unique<IdentExpr>(*$4), std::move($6->fields), std::move($6->methods), std::move($6->ctors));
+        delete $2;
+        delete $4;
+        delete $6;
+    }
+    ;
+
+class_member_list
+    : class_member
+    {
+        $$ = $1;
+    }
+    | class_member_list class_member
+    {
+        $$ = $1;
+        $$->fields.reserve($$->fields.size() + $2->fields.size());
+        $$->methods.reserve($$->methods.size() + $2->methods.size());
+        $$->ctors.reserve($$->ctors.size() + $2->ctors.size());
+        std::move($2->fields.begin(), $2->fields.end(), std::back_inserter($$->fields));
+        std::move($2->methods.begin(), $2->methods.end(), std::back_inserter($$->methods));
+        std::move($2->ctors.begin(), $2->ctors.end(), std::back_inserter($$->ctors));
+        delete $2;
+    }
+    ;
+
+class_member
+    : field_decl SEMICOLON
+    {
+        $$ = new ClassMemberAggregate();
+        $$->fields.push_back(std::unique_ptr<FieldDecl>($1));
+    }
+    | method_decl
+    {
+        $$ = new ClassMemberAggregate();
+        $$->methods.push_back(std::unique_ptr<MethodDecl>($1));
+    }
+    | ctor_decl
+    {
+        $$ = new ClassMemberAggregate();
+        $$->ctors.push_back(std::unique_ptr<CtorDecl>($1));
+    }
+    ;
+
+field_decl
+    : LET IDENT COLON type_info
+    {
+        $$ = new FieldDecl(std::make_unique<IdentExpr>(*$2, *$4), *$4);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+        delete $4;
+    }
+    ;
+
+method_decl
+    : FUNC IDENT LPAREN param_list RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    {
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($9));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+    }
+    | FUNC IDENT LPAREN RPAREN LBRACE stmt_list RETURN expr SEMICOLON RBRACE
+    {
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($6), std::unique_ptr<Expr>($8));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+    }
+    ;
+
+ctor_decl
+    : IDENT LPAREN param_list RPAREN LBRACE stmt_list RBRACE
+    {
+        $$ = new CtorDecl(std::make_unique<IdentExpr>(*$1), std::unique_ptr<ParamList>($3), std::unique_ptr<StmtList>($6));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $1;
+    }
+    | IDENT LPAREN RPAREN LBRACE stmt_list RBRACE
+    {
+        $$ = new CtorDecl(std::make_unique<IdentExpr>(*$1), nullptr, std::unique_ptr<StmtList>($5));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $1;
     }
     ;
 
@@ -223,7 +370,11 @@ stmt:
     ;
 
 stmt_list:
-    stmt SEMICOLON
+    /* empty */
+    {
+        $$ = new StmtList(std::vector<std::unique_ptr<Stmt>>());
+    }
+    | stmt SEMICOLON
     {
         $$ = new StmtList(std::vector<std::unique_ptr<Stmt>>());
         $$->stmts.push_back(std::unique_ptr<Stmt>($1));
@@ -301,6 +452,13 @@ assignable:
     | deref_expr
     {
         $$ = $1;
+    }
+    | factor DOT IDENT
+    {
+        $$ = new MemberAccessExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3));
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+        delete $3;
     }
     ;
 
@@ -547,6 +705,47 @@ factor:
     {
         $$ = $1;
     }
+    | THIS
+    {
+        $$ = new IdentExpr("this", TypeInfo{ SymbolKind::Pointer, {}, 0, false });
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | NEW IDENT LPAREN RPAREN
+    {
+        $$ = new NewExpr(std::make_unique<IdentExpr>(*$2), nullptr);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+    }
+    | NEW IDENT LPAREN arg_list RPAREN
+    {
+        $$ = new NewExpr(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ArgList>($4));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+    }
+    | factor DOT IDENT
+    {
+        $$ = new MemberAccessExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3));
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+        delete $3;
+    }
+    | factor DOT IDENT LPAREN RPAREN
+    {
+        $$ = new MethodCallExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3), nullptr);
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+        delete $3;
+    }
+    | factor DOT IDENT LPAREN arg_list RPAREN
+    {
+        $$ = new MethodCallExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3), std::unique_ptr<ArgList>($5));
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+        delete $3;
+    }
     ;
 
 addr_expr:
@@ -642,6 +841,11 @@ base_type:
     | FLOATSIGN
     {
         $$ = new TypeInfo{ SymbolKind::Float, {}, 0, true };
+    }
+    | IDENT
+    {
+        $$ = new TypeInfo{ SymbolKind::Class, {}, 0, false, *$1 };
+        delete $1;
     }
     ;
 %%

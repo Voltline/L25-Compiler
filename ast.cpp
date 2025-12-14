@@ -6,6 +6,9 @@
 #include <algorithm>
 extern bool hasError;
 std::unordered_map<std::string, int> functionMap;
+std::unordered_map<std::string, llvm::StructType*> classStructTypes;
+std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
+static std::string currentClassNameCodegen;
 
 static llvm::Type* wrapPointer(llvm::Type* base, int pointerLevel)
 {
@@ -38,6 +41,11 @@ static llvm::Type* typeInfoToLLVMType(const TypeInfo& typeInfo, llvm::LLVMContex
         baseType = decayArrayToPointer ? llvm::PointerType::get(arrayType, 0) : arrayType;
     } else if (typeInfo.kind == SymbolKind::Pointer) {
         baseType = scalarType;
+    } else if (typeInfo.kind == SymbolKind::Class) {
+        auto it = classStructTypes.find(typeInfo.className);
+        if (it != classStructTypes.end()) {
+            baseType = it->second;
+        }
     }
 
     if (!baseType) return nullptr;
@@ -105,10 +113,10 @@ static llvm::Value* castValueToType(llvm::Value* value, llvm::Type* targetType, 
 static TypeInfo typeInfoFromSymbol(const SymbolInfo* symbol)
 {
     if (!symbol) return TypeInfo{};
-    return TypeInfo{ symbol->kind, symbol->dimensions, symbol->pointerLevel, symbol->isFloat };
+    return TypeInfo{ symbol->kind, symbol->dimensions, symbol->pointerLevel, symbol->isFloat, symbol->className };
 }
 
-static TypeInfo evaluateExprType(const Expr* expr)
+TypeInfo evaluateExprType(const Expr* expr)
 {
     if (!expr) return TypeInfo{ SymbolKind::Invalid, {}, 0 };
     if (dynamic_cast<const NumberExpr*>(expr)) {
@@ -170,15 +178,33 @@ static TypeInfo evaluateExprType(const Expr* expr)
         }
         return TypeInfo{ SymbolKind::Int, {}, rhsType.pointerLevel };
     }
+    if (auto member = dynamic_cast<const MemberAccessExpr*>(expr)) {
+        TypeInfo targetType = evaluateExprType(member->target.get());
+        auto layoutIt = classFieldLayouts.find(targetType.className);
+        if (layoutIt != classFieldLayouts.end()) {
+            auto fit = std::find_if(layoutIt->second.begin(), layoutIt->second.end(), [&](const auto& f){return f.first == member->member->ident;});
+            if (fit != layoutIt->second.end()) {
+                return fit->second;
+            }
+        }
+        return TypeInfo{ SymbolKind::Invalid, {}, 0 };
+    }
+    if (dynamic_cast<const MethodCallExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0 };
+    }
     return TypeInfo{ SymbolKind::Int, {}, 0 };
 }
 
 // TypeInfo 方法
 TypeInfo::TypeInfo()
-    : kind(SymbolKind::Invalid), dims(), pointerLevel(0), isFloat(false) {}
+    : kind(SymbolKind::Invalid), dims(), pointerLevel(0), isFloat(false), className("") {}
 
-TypeInfo::TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel, bool isFloat)
-    : kind(kind), dims(std::move(dims)), pointerLevel(pointerLevel), isFloat(isFloat) {}
+TypeInfo::TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel, bool isFloat, std::string className)
+    : kind(kind)
+    , dims(std::move(dims))
+    , pointerLevel(pointerLevel)
+    , isFloat(isFloat)
+    , className(std::move(className)) {}
 
 // ASTNode 方法
 void ASTNode::reportError(const std::string& msg) const
@@ -187,14 +213,21 @@ void ASTNode::reportError(const std::string& msg) const
 }
 
 // 程序节点
-Program::Program(std::unique_ptr<IdentExpr> name, std::vector<std::unique_ptr<Func>> functions, std::unique_ptr<StmtList> main_body)
+Program::Program(std::unique_ptr<IdentExpr> name,
+                 std::vector<std::unique_ptr<ClassDecl>> classes,
+                 std::vector<std::unique_ptr<Func>> functions,
+                 std::unique_ptr<StmtList> main_body)
     : name(std::move(name))
+    , classes(std::move(classes))
     , functions(std::move(functions))
     , main_body(std::move(main_body)) {}
 
-void Program::print(int indent) const 
+void Program::print(int indent) const
 {
     std::cout << std::string(indent, ' ') << "Program(" << *name << ")" << std::endl;
+    for (const auto& cls : classes) {
+        cls->print(indent + 2);
+    }
     for (const auto& func: functions) {
         func->print(indent + 2);
     }
@@ -223,6 +256,11 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
         llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", ctx.module);
     }
 
+    // 类定义（目前仅占位）
+    for (const auto& cls : classes) {
+        cls->codeGen(ctx);
+    }
+
     // 函数部分
     for (auto& function: functions) {
         function->codeGen(ctx);
@@ -242,6 +280,182 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
     // 添加默认返回
     ctx.builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));
     return mainFunc;
+}
+
+// 类字段
+FieldDecl::FieldDecl(std::unique_ptr<IdentExpr> name, TypeInfo type)
+    : name(std::move(name))
+    , type(std::move(type)) {}
+
+void FieldDecl::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "FieldDecl" << std::endl;
+    name->print(indent + 2);
+}
+
+llvm::Value* FieldDecl::codeGen(CodeGenContext& ctx) const
+{
+    reportError("暂未实现类字段的代码生成");
+    return nullptr;
+}
+
+// 构造函数
+CtorDecl::CtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body)
+    : name(std::move(name))
+    , params(std::move(params))
+    , body(std::move(body)) {}
+
+void CtorDecl::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "CtorDecl" << std::endl;
+    name->print(indent + 2);
+    if (params) params->print(indent + 2);
+    if (body) body->print(indent + 2);
+}
+
+llvm::Value* CtorDecl::codeGen(CodeGenContext& ctx) const
+{
+    reportError("暂未实现构造函数的代码生成");
+    return nullptr;
+}
+
+// 方法
+MethodDecl::MethodDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body, std::unique_ptr<Expr> return_value)
+    : name(std::move(name))
+    , params(std::move(params))
+    , body(std::move(body))
+    , return_value(std::move(return_value))
+    , bodyScope(nullptr) {}
+
+void MethodDecl::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "MethodDecl" << std::endl;
+    name->print(indent + 2);
+    if (params) params->print(indent + 2);
+    if (body) body->print(indent + 2);
+    if (return_value) return_value->print(indent + 2);
+}
+
+llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
+{
+    if (currentClassNameCodegen.empty()) {
+        reportError("方法未关联类");
+        return nullptr;
+    }
+
+    llvm::StructType* classTy = classStructTypes[currentClassNameCodegen];
+    if (!classTy) {
+        reportError("找不到类类型：" + currentClassNameCodegen);
+        return nullptr;
+    }
+
+    std::vector<llvm::Type*> argTypes;
+    argTypes.push_back(llvm::PointerType::get(classTy, 0));
+    if (params) {
+        for (const auto& param : params->params) {
+            llvm::Type* argType = typeInfoToLLVMType(param->type, ctx.context, true);
+            argTypes.push_back(argType);
+        }
+    }
+
+    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getInt32Ty(ctx.context), argTypes, false);
+    std::string funcName = currentClassNameCodegen + "." + name->ident;
+    llvm::Function* function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, funcName, ctx.module);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
+    ctx.builder.SetInsertPoint(entry);
+
+    int idx = 0;
+    for (auto& arg : function->args()) {
+        if (idx == 0) {
+            arg.setName("this");
+            SymbolInfo* thisInfo = bodyScope ? bodyScope->lookupLocal("this") : nullptr;
+            if (thisInfo) {
+                llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, "this.addr");
+                ctx.builder.CreateStore(&arg, alloca);
+                thisInfo->addr = alloca;
+                thisInfo->value = &arg;
+            }
+        } else {
+            arg.setName(params->params[idx - 1]->ident);
+            SymbolInfo* argInfo = bodyScope ? bodyScope->lookupLocal(arg.getName().str()) : nullptr;
+            if (argInfo) {
+                llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
+                ctx.builder.CreateStore(&arg, alloca);
+                argInfo->addr = alloca;
+                argInfo->value = &arg;
+            }
+        }
+        idx++;
+    }
+
+    if (body) {
+        for (const auto& stmt : body->stmts) {
+            stmt->codeGen(ctx);
+        }
+    }
+
+    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    retVal = castValueToType(retVal, llvm::Type::getInt32Ty(ctx.context), ctx);
+    ctx.builder.CreateRet(retVal);
+    return function;
+}
+
+// 类声明
+ClassDecl::ClassDecl(std::unique_ptr<IdentExpr> name,
+                     std::unique_ptr<IdentExpr> baseClass,
+                     std::vector<std::unique_ptr<FieldDecl>> fields,
+                     std::vector<std::unique_ptr<MethodDecl>> methods,
+                     std::vector<std::unique_ptr<CtorDecl>> ctors)
+    : name(std::move(name))
+    , baseClass(std::move(baseClass))
+    , fields(std::move(fields))
+    , methods(std::move(methods))
+    , ctors(std::move(ctors)) {}
+
+void ClassDecl::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "ClassDecl(" << *name << ")" << std::endl;
+    if (baseClass) {
+        std::cout << std::string(indent + 2, ' ') << "extends ";
+        baseClass->print(0);
+    }
+    for (const auto& field : fields) {
+        field->print(indent + 2);
+    }
+    for (const auto& ctor : ctors) {
+        ctor->print(indent + 2);
+    }
+    for (const auto& method : methods) {
+        method->print(indent + 2);
+    }
+}
+
+llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
+{
+    std::vector<llvm::Type*> fieldTypes;
+    std::vector<std::pair<std::string, TypeInfo>> layout;
+    for (const auto& field : fields) {
+        llvm::Type* fieldType = typeInfoToLLVMType(field->type, ctx.context, true);
+        if (!fieldType) {
+            reportError("无法为字段生成类型：" + field->name->ident);
+            continue;
+        }
+        fieldTypes.push_back(fieldType);
+        layout.emplace_back(field->name->ident, field->type);
+    }
+    llvm::StructType* structTy = llvm::StructType::create(ctx.context, name->ident);
+    structTy->setBody(fieldTypes, false);
+    classStructTypes[name->ident] = structTy;
+    classFieldLayouts[name->ident] = layout;
+
+    std::string saved = currentClassNameCodegen;
+    currentClassNameCodegen = name->ident;
+    for (const auto& method : methods) {
+        method->codeGen(ctx);
+    }
+    currentClassNameCodegen = saved;
+    return nullptr;
 }
 
 // 函数节点
@@ -532,6 +746,12 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
             reportError("获取数组元素地址失败");
             return nullptr;
         }
+    } else if (auto memberExpr = dynamic_cast<MemberAccessExpr*>(name.get())) {
+        lhsAddr = memberExpr->getPointer(ctx);
+        if (!lhsAddr) {
+            reportError("获取成员地址失败");
+            return nullptr;
+        }
     } else if (auto derefExpr = dynamic_cast<DereferenceExpr*>(name.get())) {
         lhsAddr = derefExpr->getPointerValue(ctx);
         if (!lhsAddr || !lhsAddr->getType()->isPointerTy()) {
@@ -713,18 +933,6 @@ llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const
             }
             argsV.push_back(argVal);
             idx++;
-        }
-    }
-
-    if (funcSymbol->funcDef) {
-        for (auto* captured : funcSymbol->funcDef->captures) {
-            if (!captured) continue;
-            SymbolInfo* callerSymbol = scope->lookup(captured->name);
-            if (!callerSymbol || !callerSymbol->addr) {
-                reportError("捕获变量: " + captured->name + " 在调用点不可用");
-                return nullptr;
-            }
-            argsV.push_back(callerSymbol->addr);
         }
     }
 
@@ -1240,6 +1448,158 @@ llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
     return gep;
 }
 
+// 成员访问表达式
+MemberAccessExpr::MemberAccessExpr(std::unique_ptr<Expr> target, std::unique_ptr<IdentExpr> member)
+    : target(std::move(target))
+    , member(std::move(member)) {}
+
+void MemberAccessExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "MemberAccess" << std::endl;
+    target->print(indent + 2);
+    member->print(indent + 2);
+}
+
+llvm::Value* MemberAccessExpr::getPointer(CodeGenContext& ctx) const
+{
+    llvm::Value* baseValue = target->codeGen(ctx);
+    TypeInfo baseType = evaluateExprType(target.get());
+    if (baseType.pointerLevel > 0) {
+        baseType.pointerLevel -= 1;
+    }
+    auto layoutIt = classFieldLayouts.find(baseType.className);
+    if (layoutIt == classFieldLayouts.end()) {
+        reportError("无法找到类布局：" + baseType.className);
+        return nullptr;
+    }
+    int index = -1;
+    for (size_t i = 0; i < layoutIt->second.size(); ++i) {
+        if (layoutIt->second[i].first == member->ident) {
+            index = static_cast<int>(i);
+            break;
+        }
+    }
+    if (index < 0) {
+        reportError("成员不存在：" + member->ident);
+        return nullptr;
+    }
+
+    llvm::Value* ptr = baseValue;
+    if (!ptr->getType()->isPointerTy()) {
+        auto* tmp = ctx.builder.CreateAlloca(ptr->getType());
+        ctx.builder.CreateStore(ptr, tmp);
+        ptr = tmp;
+    }
+
+    llvm::StructType* structTy = classStructTypes[baseType.className];
+    if (!structTy) {
+        reportError("无法找到类类型：" + baseType.className);
+        return nullptr;
+    }
+
+    llvm::PointerType* targetPtrTy = llvm::PointerType::get(structTy, 0);
+    if (ptr->getType() != targetPtrTy) {
+        ptr = ctx.builder.CreateBitCast(ptr, targetPtrTy);
+    }
+    return ctx.builder.CreateStructGEP(structTy, ptr, index, "fieldptr");
+}
+
+llvm::Value* MemberAccessExpr::codeGen(CodeGenContext& ctx) const
+{
+    llvm::Value* ptr = getPointer(ctx);
+    if (!ptr) return nullptr;
+    TypeInfo baseType = evaluateExprType(target.get());
+    if (baseType.pointerLevel > 0) {
+        baseType.pointerLevel -= 1;
+    }
+    auto layoutIt = classFieldLayouts.find(baseType.className);
+    if (layoutIt == classFieldLayouts.end()) {
+        reportError("无法找到类布局：" + baseType.className);
+        return nullptr;
+    }
+    int index = -1;
+    for (size_t i = 0; i < layoutIt->second.size(); ++i) {
+        if (layoutIt->second[i].first == member->ident) {
+            index = static_cast<int>(i);
+            break;
+        }
+    }
+    if (index < 0) {
+        reportError("成员不存在：" + member->ident);
+        return nullptr;
+    }
+
+    llvm::Type* fieldTy = typeInfoToLLVMType(layoutIt->second[index].second, ctx.context, true);
+    if (!fieldTy) {
+        reportError("无法得到字段类型：" + member->ident);
+        return nullptr;
+    }
+
+    return ctx.builder.CreateLoad(fieldTy, ptr, "fieldload");
+}
+
+// 方法调用
+MethodCallExpr::MethodCallExpr(std::unique_ptr<Expr> target, std::unique_ptr<IdentExpr> method, std::unique_ptr<ArgList> args)
+    : target(std::move(target))
+    , method(std::move(method))
+    , args(std::move(args)) {}
+
+void MethodCallExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "MethodCall" << std::endl;
+    target->print(indent + 2);
+    method->print(indent + 2);
+    if (args) args->print(indent + 2);
+}
+
+llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
+{
+    llvm::Value* baseValue = target->codeGen(ctx);
+    TypeInfo baseType = evaluateExprType(target.get());
+    llvm::StructType* structTy = classStructTypes[baseType.className];
+    if (!structTy) {
+        reportError("无法找到方法所属的类类型");
+        return nullptr;
+    }
+    llvm::Value* thisPtr = baseValue;
+    if (!thisPtr->getType()->isPointerTy()) {
+        auto* tmp = ctx.builder.CreateAlloca(thisPtr->getType());
+        ctx.builder.CreateStore(thisPtr, tmp);
+        thisPtr = tmp;
+    }
+    std::vector<llvm::Value*> callArgs;
+    callArgs.push_back(thisPtr);
+    if (args) {
+        for (const auto& arg : args->args) {
+            callArgs.push_back(arg->codeGen(ctx));
+        }
+    }
+    std::string funcName = baseType.className + "." + method->ident;
+    llvm::Function* callee = ctx.module.getFunction(funcName);
+    if (!callee) {
+        reportError("未找到方法定义：" + funcName);
+        return nullptr;
+    }
+    return ctx.builder.CreateCall(callee, callArgs, "methodcall");
+}
+
+// new 表达式
+NewExpr::NewExpr(std::unique_ptr<IdentExpr> className, std::unique_ptr<ArgList> args)
+    : className(std::move(className))
+    , args(std::move(args)) {}
+
+void NewExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "NewExpr(" << className->ident << ")" << std::endl;
+    if (args) args->print(indent + 2);
+}
+
+llvm::Value* NewExpr::codeGen(CodeGenContext& ctx) const
+{
+    reportError("暂未实现 new 表达式的代码生成");
+    return nullptr;
+}
+
 // 标识符节点
 IdentExpr::IdentExpr(const std::string& ident, TypeInfo type) : ident(ident), type(type) {}
 
@@ -1290,8 +1650,9 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
         TypeInfo symbolType{ SymbolKind::Pointer, {}, symbol->pointerLevel, symbol->isFloat };
         llvm::Type* valueType = typeInfoToLLVMValueType(symbolType, ctx.context);
         return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
-    } else if (symbol->kind == SymbolKind::Pointer) {
-        llvm::Type* valueType = typeInfoToLLVMValueType(TypeInfo{ SymbolKind::Pointer, {}, symbol->pointerLevel }, ctx.context);
+    } else if (symbol->kind == SymbolKind::Class) {
+        TypeInfo symbolType{ SymbolKind::Class, symbol->dimensions, symbol->pointerLevel, symbol->isFloat, symbol->className };
+        llvm::Type* valueType = typeInfoToLLVMValueType(symbolType, ctx.context);
         return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;

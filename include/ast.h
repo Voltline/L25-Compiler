@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <unordered_map>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
@@ -11,6 +12,13 @@
 struct ASTNode;
 struct Program;
 struct Func;
+struct ClassDecl;
+struct FieldDecl;
+struct MethodDecl;
+struct CtorDecl;
+struct MemberAccessExpr;
+struct MethodCallExpr;
+struct NewExpr;
 struct Stmt;
 struct StmtList;
 struct DeclareStmt;
@@ -42,12 +50,13 @@ struct TypeInfo
     std::vector<int> dims; // 数组维度
     int pointerLevel; // 指针层级
     bool isFloat; // 是否为浮点类型
+    std::string className; // 类名（仅用于类/类指针类型）
 
     TypeInfo();
-    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false);
+    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false, std::string className = "");
 };
 
-struct CodeGenContext 
+struct CodeGenContext
 {
     llvm::LLVMContext& context;
     llvm::Module& module;
@@ -61,6 +70,10 @@ struct CodeGenContext
                    llvm::IRBuilder<>& b)
         : context(ctx), module(mod), builder(b) {}
 };
+
+extern std::unordered_map<std::string, llvm::StructType*> classStructTypes;
+extern std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
+TypeInfo evaluateExprType(const Expr* expr);
 
 // AST节点基类
 struct ASTNode
@@ -83,10 +96,14 @@ struct ASTNode
 struct Program: public ASTNode
 {
     std::unique_ptr<IdentExpr> name;
+    std::vector<std::unique_ptr<ClassDecl>> classes;
     std::vector<std::unique_ptr<Func>> functions;
     std::unique_ptr<StmtList> main_body;
 
-    Program(std::unique_ptr<IdentExpr> name, std::vector<std::unique_ptr<Func>> functions, std::unique_ptr<StmtList> main_body);
+    Program(std::unique_ptr<IdentExpr> name,
+            std::vector<std::unique_ptr<ClassDecl>> classes,
+            std::vector<std::unique_ptr<Func>> functions,
+            std::unique_ptr<StmtList> main_body);
 
     void print(int indent = 0) const override;
 
@@ -95,6 +112,69 @@ struct Program: public ASTNode
 
 // 语句节点
 struct Stmt: public ASTNode {};
+
+// 类字段声明
+struct FieldDecl: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    TypeInfo type;
+
+    FieldDecl(std::unique_ptr<IdentExpr> name, TypeInfo type);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 构造函数声明
+struct CtorDecl: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<ParamList> params;
+    std::unique_ptr<StmtList> body;
+
+    CtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 方法声明
+struct MethodDecl: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<ParamList> params;
+    std::unique_ptr<StmtList> body;
+    std::unique_ptr<Expr> return_value;
+    Scope* bodyScope = nullptr;
+
+    MethodDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body, std::unique_ptr<Expr> return_value);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 类声明
+struct ClassDecl: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<IdentExpr> baseClass; // Nullable
+    std::vector<std::unique_ptr<FieldDecl>> fields;
+    std::vector<std::unique_ptr<MethodDecl>> methods;
+    std::vector<std::unique_ptr<CtorDecl>> ctors;
+
+    ClassDecl(std::unique_ptr<IdentExpr> name,
+              std::unique_ptr<IdentExpr> baseClass,
+              std::vector<std::unique_ptr<FieldDecl>> fields,
+              std::vector<std::unique_ptr<MethodDecl>> methods,
+              std::vector<std::unique_ptr<CtorDecl>> ctors);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
 
 // 函数定义节点
 struct Func: public Stmt
@@ -312,6 +392,47 @@ struct ArraySubscriptExpr: public Expr
 
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
     llvm::Value* getAddress(CodeGenContext& ctx) const;
+};
+
+// 成员访问表达式
+struct MemberAccessExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<IdentExpr> member;
+
+    MemberAccessExpr(std::unique_ptr<Expr> target, std::unique_ptr<IdentExpr> member);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+    llvm::Value* getPointer(CodeGenContext& ctx) const;
+};
+
+// 方法调用表达式
+struct MethodCallExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<IdentExpr> method;
+    std::unique_ptr<ArgList> args; // Nullable
+
+    MethodCallExpr(std::unique_ptr<Expr> target, std::unique_ptr<IdentExpr> method, std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// new 表达式
+struct NewExpr: public Expr
+{
+    std::unique_ptr<IdentExpr> className;
+    std::unique_ptr<ArgList> args; // Nullable
+
+    NewExpr(std::unique_ptr<IdentExpr> className, std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
 // 标识符节点

@@ -22,6 +22,35 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     SymbolInfo progInfo{ SymbolKind::Program, program.name->ident };
     declareSymbol(program.name->ident, progInfo);
 
+    // 先注册类符号
+    for (auto& cls : program.classes) {
+        const std::string& className = cls->name->ident;
+        if (checkSameScopeSymbolExists(className)) {
+            reportError(*cls, "类重定义：" + className);
+            continue;
+        }
+        SymbolInfo classInfo{ SymbolKind::Class, className };
+        for (const auto& field : cls->fields) {
+            classInfo.classFields.emplace_back(field->name->ident, field->type);
+        }
+        for (const auto& method : cls->methods) {
+            std::vector<TypeInfo> params;
+            if (method->params) {
+                for (const auto& param : method->params->params) {
+                    params.push_back(param->type);
+                }
+            }
+            classInfo.methodParamTypes[method->name->ident] = params;
+        }
+        declareSymbol(className, classInfo);
+        classFieldLayouts[className] = classInfo.classFields;
+        classDecls[className] = cls.get();
+    }
+
+    for (auto& cls : program.classes) {
+        analyzeClass(*cls);
+    }
+
     // 第一步：构建函数的符号表
     for (auto& func : program.functions) {
         const std::string& funcName = func->name->ident;
@@ -66,6 +95,84 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
     exitScope();
 }
 
+void SemanticAnalyzer::analyzeClass(ClassDecl& cls)
+{
+    cls.scope = currentScope;
+    currentClass = &cls;
+    enterScope();
+    // 注册字段
+    for (const auto& field : cls.fields) {
+        if (checkSameScopeSymbolExists(field->name->ident)) {
+            reportError(*field, "字段重定义：" + field->name->ident);
+            continue;
+        }
+        SymbolInfo info{ field->name->ident, field->type };
+        declareSymbol(field->name->ident, info);
+    }
+
+    // 构造函数
+    for (auto& ctor : cls.ctors) {
+        analyzeCtor(*ctor);
+    }
+
+    // 方法
+    for (auto& method : cls.methods) {
+        analyzeMethod(*method);
+    }
+    exitScope();
+    currentClass = nullptr;
+}
+
+void SemanticAnalyzer::analyzeCtor(CtorDecl& ctor)
+{
+    ctor.scope = currentScope;
+    enterScope();
+    if (currentClass) {
+        TypeInfo thisType{ SymbolKind::Class, {}, 1, false, currentClass->name->ident };
+        SymbolInfo thisInfo{ "this", thisType };
+        declareSymbol("this", thisInfo);
+    }
+    if (ctor.params) {
+        for (const auto& param : ctor.params->params) {
+            SymbolInfo paramInfo{ param->ident, param->type };
+            declareSymbol(param->ident, paramInfo);
+        }
+    }
+    if (ctor.body) {
+        for (const auto& stmt : ctor.body->stmts) {
+            analyzeStmt(*stmt);
+        }
+    }
+    exitScope();
+}
+
+void SemanticAnalyzer::analyzeMethod(MethodDecl& method)
+{
+    method.scope = currentScope;
+    enterScope();
+    method.bodyScope = currentScope;
+    if (currentClass) {
+        TypeInfo thisType{ SymbolKind::Class, {}, 1, false, currentClass->name->ident };
+        SymbolInfo thisInfo{ "this", thisType };
+        declareSymbol("this", thisInfo);
+    }
+    if (method.params) {
+        for (const auto& param : method.params->params) {
+            SymbolInfo paramInfo{ param->ident, param->type };
+            declareSymbol(param->ident, paramInfo);
+        }
+    }
+    if (method.body) {
+        for (const auto& stmt : method.body->stmts) {
+            analyzeStmt(*stmt);
+        }
+    }
+    if (method.return_value) {
+        analyzeExpr(*method.return_value);
+    }
+    exitScope();
+}
+
 void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
 {
     stmt.scope = currentScope;
@@ -95,6 +202,9 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeExpr(*assign->expr);
         } else if (auto derefAssign = dynamic_cast<DereferenceExpr*>(assign->name.get())) {
             analyzeExpr(*derefAssign);
+            analyzeExpr(*assign->expr);
+        } else {
+            analyzeExpr(*assign->name);
             analyzeExpr(*assign->expr);
         }
     } else if (auto ifStmt = dynamic_cast<IfStmt*>(&stmt)) {
@@ -186,12 +296,22 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         // 记录闭包捕获
         if (!funcStack.empty()) {
             Scope* declScope = findSymbolScope(ident->ident);
-            if (declScope && declScope != funcStack.back()->body_scope) {
-                SymbolInfo* capturedSymbol = currentScope->lookup(ident->ident);
-                if (capturedSymbol && capturedSymbol->kind != SymbolKind::Function && capturedSymbol->kind != SymbolKind::Program) {
-                    auto& captureList = funcStack.back()->captures;
-                    if (std::find(captureList.begin(), captureList.end(), capturedSymbol) == captureList.end()) {
-                        captureList.push_back(capturedSymbol);
+            if (declScope) {
+                bool insideCurrentFunc = false;
+                for (Scope* walk = declScope; walk; walk = walk->getParent()) {
+                    if (walk == funcStack.back()->body_scope) {
+                        insideCurrentFunc = true;
+                        break;
+                    }
+                }
+
+                if (!insideCurrentFunc) {
+                    SymbolInfo* capturedSymbol = currentScope->lookup(ident->ident);
+                    if (capturedSymbol && capturedSymbol->kind != SymbolKind::Function && capturedSymbol->kind != SymbolKind::Program) {
+                        auto& captureList = funcStack.back()->captures;
+                        if (std::find(captureList.begin(), captureList.end(), capturedSymbol) == captureList.end()) {
+                            captureList.push_back(capturedSymbol);
+                        }
                     }
                 }
             }
@@ -252,6 +372,63 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         analyzeExpr(*addrExpr->target);
     } else if (auto derefExpr = dynamic_cast<const DereferenceExpr*>(&expr)) {
         analyzeExpr(*derefExpr->pointerExpr);
+    } else if (auto member = dynamic_cast<const MemberAccessExpr*>(&expr)) {
+        analyzeExpr(*member->target);
+        TypeInfo targetType = evaluateExprType(member->target.get());
+        std::string className = targetType.className;
+        if (targetType.kind == SymbolKind::Class && className.empty()) {
+            className = member->target->scope ? member->target->scope->lookup(member->member->ident)->name : "";
+        }
+        if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
+            targetType.pointerLevel -= 1;
+        }
+        if (targetType.kind != SymbolKind::Class || className.empty()) {
+            reportError(*member, "成员访问目标不是类类型");
+            return;
+        }
+        SymbolInfo* clsInfo = rootScope ? rootScope->lookup(className) : nullptr;
+        if (!clsInfo || clsInfo->kind != SymbolKind::Class) {
+            reportError(*member, "未知的类：" + className);
+            return;
+        }
+        auto it = std::find_if(clsInfo->classFields.begin(), clsInfo->classFields.end(), [&](const auto& f){return f.first == member->member->ident;});
+        if (it == clsInfo->classFields.end()) {
+            reportError(*member, "类中不存在成员：" + member->member->ident);
+        }
+    } else if (auto methodCall = dynamic_cast<const MethodCallExpr*>(&expr)) {
+        analyzeExpr(*methodCall->target);
+        TypeInfo targetType = evaluateExprType(methodCall->target.get());
+        std::string className = targetType.className;
+        if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
+            targetType.pointerLevel -= 1;
+        }
+        if (className.empty()) {
+            className = evaluateExprType(methodCall->target.get()).className;
+        }
+        if (targetType.kind != SymbolKind::Class || className.empty()) {
+            reportError(*methodCall, "方法调用目标不是类类型");
+            return;
+        }
+        SymbolInfo* clsInfo = rootScope ? rootScope->lookup(className) : nullptr;
+        if (!clsInfo || clsInfo->kind != SymbolKind::Class) {
+            reportError(*methodCall, "未知的类：" + className);
+            return;
+        }
+        auto mit = clsInfo->methodParamTypes.find(methodCall->method->ident);
+        if (mit == clsInfo->methodParamTypes.end()) {
+            reportError(*methodCall, "方法不存在：" + methodCall->method->ident);
+            return;
+        }
+        const auto& paramTypes = mit->second;
+        size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+        if (argCount != paramTypes.size()) {
+            reportError(*methodCall, "方法参数数量不匹配");
+        }
+        if (methodCall->args) {
+            for (const auto& arg : methodCall->args->args) {
+                analyzeExpr(*arg);
+            }
+        }
     }
 }
 

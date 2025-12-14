@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "symbol.h"
 #include "ast.h"
 
@@ -12,6 +13,12 @@ public:
 private:
     Scope* currentScope = nullptr;
     std::vector<Func*> funcStack; // 用于记录当前函数链以发现捕获
+    std::unordered_map<std::string, ClassDecl*> classDecls; // 已注册的类声明
+    ClassDecl* currentClass = nullptr;
+
+    void analyzeClass(ClassDecl& cls);
+    void analyzeMethod(MethodDecl& method);
+    void analyzeCtor(CtorDecl& ctor);
 
     void analyzeProgram(Program& program);
     void analyzeFunc(Func& func);
