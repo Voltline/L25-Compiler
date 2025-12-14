@@ -1,0 +1,15 @@
+program class_method {
+    class Counter {
+        let val: int;
+        func inc(delta) {
+            this.val = this.val + delta;
+            return this.val;
+        }
+    }
+
+    main {
+        let c: Counter;
+        c.val = 5;
+        output(c.inc(2), c.val);
+    }
+}

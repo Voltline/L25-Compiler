@@ -1,0 +1,17 @@
+program class_basic {
+    class Point {
+        let x: int;
+        let y: int;
+        func sum() {
+            let tmp = this.x + this.y;
+            return tmp;
+        }
+    }
+
+    main {
+        let p: Point;
+        p.x = 3;
+        p.y = 4;
+        output(p.x, p.y, p.sum());
+    }
+}

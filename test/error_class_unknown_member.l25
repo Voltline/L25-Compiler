@@ -1,0 +1,14 @@
+program class_error {
+    class Box {
+        let value: int;
+        func get() {
+            return this.value;
+        }
+    }
+
+    main {
+        let b: Box;
+        b.value = 1;
+        output(b.missing);
+    }
+}

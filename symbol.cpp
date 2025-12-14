@@ -3,7 +3,12 @@
 
 /* SymbolInfo 方法定义 */
 SymbolInfo::SymbolInfo(SymbolKind kind, const std::string& name)
-    : kind(kind), name(name) {}
+    : kind(kind), name(name)
+{
+    if (kind == SymbolKind::Class) {
+        className = name;
+    }
+}
 
 SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type)
     : name(name)
@@ -11,6 +16,7 @@ SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type)
     kind = type.kind;
     pointerLevel = type.pointerLevel;
     isFloat = type.isFloat;
+    className = type.className;
     if (kind == SymbolKind::Array) {
         dimensions = type.dims; // 保存维度信息
     }
