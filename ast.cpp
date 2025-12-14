@@ -728,6 +728,18 @@ llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const
         }
     }
 
+    if (funcSymbol->funcDef) {
+        for (auto* captured : funcSymbol->funcDef->captures) {
+            if (!captured) continue;
+            SymbolInfo* callerSymbol = scope->lookup(captured->name);
+            if (!callerSymbol || !callerSymbol->addr) {
+                reportError("捕获变量: " + captured->name + " 在调用点不可用");
+                return nullptr;
+            }
+            argsV.push_back(callerSymbol->addr);
+        }
+    }
+
     ctx.builder.CreateCall(calleeFunc, argsV);
     return nullptr; // 作为语句，不返回值
 }
@@ -1278,6 +1290,9 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
         TypeInfo symbolType{ SymbolKind::Pointer, {}, symbol->pointerLevel, symbol->isFloat };
         llvm::Type* valueType = typeInfoToLLVMValueType(symbolType, ctx.context);
         return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
+    } else if (symbol->kind == SymbolKind::Pointer) {
+        llvm::Type* valueType = typeInfoToLLVMValueType(TypeInfo{ SymbolKind::Pointer, {}, symbol->pointerLevel }, ctx.context);
+        return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
     }
@@ -1330,6 +1345,18 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
             }
             argsV.push_back(argVal);
             idx++;
+        }
+    }
+
+    if (funcSymbol->funcDef) {
+        for (auto* captured : funcSymbol->funcDef->captures) {
+            if (!captured) continue;
+            SymbolInfo* callerSymbol = scope->lookup(captured->name);
+            if (!callerSymbol || !callerSymbol->addr) {
+                reportError("捕获变量: " + captured->name + " 在调用点不可用");
+                return nullptr;
+            }
+            argsV.push_back(callerSymbol->addr);
         }
     }
 
