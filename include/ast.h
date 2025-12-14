@@ -23,6 +23,7 @@ struct OutputStmt;
 struct Expr;
 struct BoolExpr;
 struct NumberExpr;
+struct FloatNumberExpr;
 struct UnaryExpr;
 struct BinaryExpr;
 struct IdentExpr;
@@ -37,12 +38,13 @@ class Scope;
 // 类型参数，不是AST节点
 struct TypeInfo
 {
-    SymbolKind kind; // 默认不使用
+    SymbolKind kind; // 类型类别
     std::vector<int> dims; // 数组维度
     int pointerLevel; // 指针层级
+    bool isFloat; // 是否为浮点类型
 
     TypeInfo();
-    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0);
+    TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false);
 };
 
 struct CodeGenContext 
@@ -70,9 +72,9 @@ struct ASTNode
     virtual llvm::Value* codeGen(CodeGenContext& ctx) const = 0;
 
     // 当前节点对应的作用域树节点
-    Scope* scope; 
-    int lineno;
-    int column;
+    Scope* scope = nullptr;
+    int lineno = 0;
+    int column = 0;
 
     void reportError(const std::string& msg) const;
 };
@@ -237,10 +239,19 @@ struct BoolExpr: public ASTNode
 };
 
 // 整数常量节点
-struct NumberExpr: public Expr 
+struct NumberExpr: public Expr
 {
     int value;
     NumberExpr(int val);
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+struct FloatNumberExpr: public Expr
+{
+    double value;
+    explicit FloatNumberExpr(double val);
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(CodeGenContext& ctx) const override;

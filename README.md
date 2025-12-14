@@ -96,6 +96,28 @@ program ptr {
 }
 ```
 
+* 🌊 *32-bit floating point numbers with C-style promotions*:
+```L25
+program float_ops {
+    func sum(a: float, b: float) {
+        return a + b;           // returns float, implicitly truncated to int by caller signature
+    }
+
+    main {
+        let x: float = 1.5;
+        let y: float;
+        let vec: [2] float;
+
+        y = x + 2;              // int promoted to float
+        vec[0] = x;
+        vec[1] = y * 2.0;
+
+        output x, y, vec[0], vec[1];
+        output sum(y, 0.5), y - 0.5, 3 / 2; // mixed int/float operations
+    }
+}
+```
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -221,7 +243,8 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 <array_subscript_list> = <expr> { "," <expr> }
 
 <dim_list> = <number> {"," <number> }
-<type_info> = "int" | "[" <dim_list> "]" | "*" <type_info>
+<type_info> = <base_type> | "[" <dim_list> "]" [ <base_type> ] | "*" <type_info>
+<base_type> = "int" | "float"
 
 <input_arg_list> = ( <ident> | <array_subscript_expr> ) { "," ( <ident> | <array_subscript_expr> ) }
 

@@ -14,11 +14,17 @@ struct TypeInfo;
 struct Func;
 
 enum class SymbolKind {
-    Int, Array, Pointer, Function, Program, Invalid
+    Int,
+    Float,
+    Array,
+    Pointer,
+    Function,
+    Program,
+    Invalid
 };
 
 const char* const SymbolName[] {
-    "Int", "Array", "Pointer", "Function", "Program", "Invalid"
+    "Int", "Float", "Array", "Pointer", "Function", "Program", "Invalid"
 };
 
 struct SymbolInfo
@@ -33,6 +39,7 @@ struct SymbolInfo
     bool isFuncParam = false;           // 是否为函数参数(影响数组访问)
     std::string llvmName = "";               // LLVM中的唯一名字
     int pointerLevel = 0;               // 指针层级
+    bool isFloat = false;               // 浮点标识
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

@@ -23,6 +23,7 @@ void updateLocationAndColumn()
 
 letter [a-zA-Z]
 number [0-9]+
+floatnumber (([0-9]+\.[0-9]*)|([0-9]*\.[0-9]+))
 ident {letter}({letter}|[0-9])*
 
 %%
@@ -39,7 +40,9 @@ ident {letter}({letter}|[0-9])*
 "return"    { updateLocationAndColumn(); return RETURN; }
 "null"      { updateLocationAndColumn(); return NULLSIGN; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
+"float"     { updateLocationAndColumn(); return FLOATSIGN; }
 
+{floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }
 {ident}     { updateLocationAndColumn(); yylval.ident = new std::string{ yytext }; return IDENT; }
 

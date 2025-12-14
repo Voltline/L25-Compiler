@@ -10,6 +10,7 @@ SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type)
 {
     kind = type.kind;
     pointerLevel = type.pointerLevel;
+    isFloat = type.isFloat;
     if (kind == SymbolKind::Array) {
         dimensions = type.dims; // 保存维度信息
     }

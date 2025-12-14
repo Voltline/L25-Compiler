@@ -26,6 +26,7 @@ extern Program* rootProgram;
 
 %union {
     int num;
+    double fnum;
     std::string* ident;
     Expr* expr;
     ParamList* paramList; // 函数定义
@@ -78,11 +79,13 @@ extern Program* rootProgram;
 
 %type <dims> dim_list
 %type <typeInfo> type_info
+%type <typeInfo> base_type
 
 %token <num> NUMBER
+%token <fnum> FLOATNUMBER
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NULLSIGN INTSIGN FLOATSIGN
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
 %left PLUS MINUS
@@ -509,6 +512,12 @@ factor:
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }
+    | FLOATNUMBER
+    {
+        $$ = new FloatNumberExpr($1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     | IDENT
     {
         $$ = new IdentExpr(*$1);
@@ -598,22 +607,41 @@ dim_list:
     ;
 
 type_info:
-    INTSIGN
+    base_type
     {
-        $$ = new TypeInfo{ SymbolKind::Int, {}, 0 };
+        $$ = $1;
     }
     |
     LBRACKET dim_list RBRACKET
     {
-        $$ = new TypeInfo{ SymbolKind::Array, *$2, 0 };
+        $$ = new TypeInfo{ SymbolKind::Array, *$2, 0, false };
+        delete $2;
+    }
+    |
+    LBRACKET dim_list RBRACKET base_type
+    {
+        $$ = new TypeInfo{ SymbolKind::Array, *$2, 0, $4->isFloat };
+        delete $2;
+        delete $4;
     }
     | STAR type_info %prec DEREF
     {
         $$ = new TypeInfo(*$2);
         $$->pointerLevel += 1;
-        if ($$->kind == SymbolKind::Int || $$->kind == SymbolKind::Pointer) {
+        if ($$->kind == SymbolKind::Int || $$->kind == SymbolKind::Pointer || $$->kind == SymbolKind::Float) {
             $$->kind = SymbolKind::Pointer;
         }
+    }
+    ;
+
+base_type:
+    INTSIGN
+    {
+        $$ = new TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    | FLOATSIGN
+    {
+        $$ = new TypeInfo{ SymbolKind::Float, {}, 0, true };
     }
     ;
 %%

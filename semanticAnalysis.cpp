@@ -280,7 +280,7 @@ bool SemanticAnalyzer::checkSymbolTypeMatch(const std::string& name, const TypeI
         return false;
     }
     SymbolInfo* symbolInTable{ currentScope->lookup(name) };
-    if (symbolInTable->kind == type.kind) {
+    if (symbolInTable->kind == type.kind && symbolInTable->isFloat == type.isFloat) {
         if (type.kind != SymbolKind::Array) {
             return true;
         }
