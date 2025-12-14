@@ -37,6 +37,10 @@ all: l25cc
 debug: CXXFLAGS += -g -fsanitize=address -fno-omit-frame-pointer
 debug: l25cc
 
+# test 目标
+test: all
+	./test.sh
+
 l25cc: lexer.o parser.o ast.o symbol.o semanticAnalysis.o errorReporter.o main.o
 	$(CXX) $(CXXFLAGS) $(LLVM_LDFLAGS) $(LLVM_LIBS) -o l25cc lexer.o parser.o ast.o symbol.o semanticAnalysis.o errorReporter.o main.o
 
@@ -70,4 +74,4 @@ main.o: main.cpp
 clean:
 	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output
 
-.PHONY: all clean debug
+.PHONY: all clean debug test

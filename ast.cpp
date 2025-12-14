@@ -1462,8 +1462,24 @@ void MemberAccessExpr::print(int indent) const
 
 llvm::Value* MemberAccessExpr::getPointer(CodeGenContext& ctx) const
 {
-    llvm::Value* baseValue = target->codeGen(ctx);
     TypeInfo baseType = evaluateExprType(target.get());
+        llvm::Value* baseValue = nullptr;
+    if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {
+        if (SymbolInfo* symbol = ident->scope->lookup(ident->ident)) {
+            if (symbol->kind == SymbolKind::Class && symbol->pointerLevel == 0) {
+                baseValue = symbol->addr;
+            }
+        }
+    } else if (auto memberAccess = dynamic_cast<MemberAccessExpr*>(target.get())) {
+        baseValue = memberAccess->getPointer(ctx);
+    } else if (auto arrayAccess = dynamic_cast<ArraySubscriptExpr*>(target.get())) {
+        baseValue = arrayAccess->getAddress(ctx);
+    }
+
+    if (!baseValue) {
+        baseValue = target->codeGen(ctx);
+    }
+
     if (baseType.pointerLevel > 0) {
         baseType.pointerLevel -= 1;
     }
@@ -1554,8 +1570,23 @@ void MethodCallExpr::print(int indent) const
 
 llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
 {
-    llvm::Value* baseValue = target->codeGen(ctx);
     TypeInfo baseType = evaluateExprType(target.get());
+        llvm::Value* baseValue = nullptr;
+    if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {
+        if (SymbolInfo* symbol = ident->scope->lookup(ident->ident)) {
+            if (symbol->kind == SymbolKind::Class && symbol->pointerLevel == 0) {
+                baseValue = symbol->addr;
+            }
+        }
+    } else if (auto memberAccess = dynamic_cast<MemberAccessExpr*>(target.get())) {
+        baseValue = memberAccess->getPointer(ctx);
+    } else if (auto arrayAccess = dynamic_cast<ArraySubscriptExpr*>(target.get())) {
+        baseValue = arrayAccess->getAddress(ctx);
+    }
+
+    if (!baseValue) {
+        baseValue = target->codeGen(ctx);
+    }
     llvm::StructType* structTy = classStructTypes[baseType.className];
     if (!structTy) {
         reportError("无法找到方法所属的类类型");
@@ -1566,6 +1597,10 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
         auto* tmp = ctx.builder.CreateAlloca(thisPtr->getType());
         ctx.builder.CreateStore(thisPtr, tmp);
         thisPtr = tmp;
+    }
+    llvm::PointerType* targetPtrTy = llvm::PointerType::get(structTy, 0);
+    if (thisPtr->getType() != targetPtrTy) {
+        thisPtr = ctx.builder.CreateBitCast(thisPtr, targetPtrTy);
     }
     std::vector<llvm::Value*> callArgs;
     callArgs.push_back(thisPtr);

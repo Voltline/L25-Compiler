@@ -118,6 +118,25 @@ program float_ops {
 }
 ```
 
+* 🧱 *Basic Object-Oriented Programming (Class & Method)*:
+```L25
+program class_method {
+    class Counter {
+        let val: int;
+        func inc(delta) {
+            this.val = this.val + delta;
+            return this.val;
+        }
+    }
+
+    main {
+        let c: Counter;
+        c.val = 5;
+        output(c.inc(2), c.val);
+    }
+}
+```
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -203,60 +222,180 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 ## 📜 Grammar
 > 📐 Extended L25 Grammar with EBNF description
 ```
-<program> = "program" <ident> "{" <func_def_list> "main" "{" <stmt_list> "}" "}"
+<program> =
+    "program" <ident> "{"
+        { <class_def> | <func_def> }
+        "main" "{" <stmt_list> "}"
+    "}"
 
-<func_def_list> = <func_def> { <func_def> }
+<class_def> =
+    "class" <ident> "{"
+        { <class_member> }
+    "}"
 
-<func_def> = "func" <ident> "(" [ <param_list> ] ")" "{" <stmt_list> "return" <expr> ";" "}"
+<class_member> =
+      <field_decl>
+    | <method_def>
 
-<param_list> = <typed_ident> { "," <typed_ident> }
+<field_decl> =
+    "let" <ident> ":" <type_info> ";"
 
-<typed_ident> = <ident> [ ":" <type_info> ]
+<method_def> =
+    "func" <ident> "(" [ <param_list> ] ")" "{"
+        <stmt_list>
+        "return" <expr> ";"
+    "}"
 
-<stmt_list> = <stmt> ";" { <stmt> ";" }
+<func_def> =
+    "func" <ident> "(" [ <param_list> ] ")" "{"
+        <stmt_list>
+        "return" <expr> ";"
+    "}"
 
-<stmt> = <declare_stmt> | <assign_stmt> | <if_stmt> | <while_stmt> | <input_stmt> |
-<output_stmt> | <func_call> | <nested_func_stmt>
+<param_list> =
+    <typed_ident> { "," <typed_ident> }
 
-<declare_stmt> = "let" <ident>                          // Only declaration, default int
-               | "let" <ident> "=" <expr>               // Implicit int, with initial value
-               | "let" <ident> ":" "int"                // Explicit int, with default value 0
-               | "let" <ident> ":" "int" "=" <expr>     // Explicit int, with initial value
-               | "let" <ident> ":" "[" <dim_list> "]"   // Explicit array, default 0 for every slot
+<typed_ident> =
+    <ident> [ ":" <type_info> ]
 
-<assign_stmt> = (<ident> | <array_subscript_expr> | "*" <factor>) "=" <expr>
-<if_stmt> = "if" "(" <bool_expr> ")" "{" <stmt_list> "}" [ "else" "{" <stmt_list> "}" ]
-<while_stmt> = "while" "(" <bool_expr> ")" "{" <stmt_list> "}"
-<func_call> = <ident> "(" [ <arg_list> ] ")"
-<arg_list> = <expr> { "," <expr> }
-<input_stmt> = "input" "(" <input_arg_list> ")"
-<output_stmt> = "output" "(" <arg_list> ")"
-<nested_func_stmt> = <func_def>
+<stmt_list> =
+    <stmt> ";" { <stmt> ";" }
 
-<bool_expr> = <expr> ("==" | "!=" | "<" | "<=" | ">" | ">=") <expr>
+<stmt> =
+      <declare_stmt>
+    | <assign_stmt>
+    | <if_stmt>
+    | <while_stmt>
+    | <input_stmt>
+    | <output_stmt>
+    | <func_call>
+    | <method_call>
+    | <nested_func_stmt>
 
-<expr> = [ "+" | "-" ] <term> { ("+" | "-") <term> }
-<term> = <factor> { ("*" | "/" | "%") <factor> }
-<factor> = <ident> | <number> | "(" <expr> ")" | <func_call> | <array_subscript_expr> | "&" <factor> | "*" <factor>
+<declare_stmt> =
+      "let" <ident>
+    | "let" <ident> "=" <expr>
+    | "let" <ident> ":" <type_info>
+    | "let" <ident> ":" <type_info> "=" <expr>
 
-<array_subscript_expr> = <ident> "[" <array_subscript_list> "]"
-<array_subscript_list> = <expr> { "," <expr> }
+<assign_stmt> =
+    ( <lvalue> ) "=" <expr>
 
-<dim_list> = <number> {"," <number> }
-<type_info> = <base_type> | "[" <dim_list> "]" [ <base_type> ] | "*" <type_info>
-<base_type> = "int" | "float"
+<lvalue> =
+      <ident>
+    | <array_subscript_expr>
+    | <member_access>
+    | "*" <factor>
 
-<input_arg_list> = ( <ident> | <array_subscript_expr> ) { "," ( <ident> | <array_subscript_expr> ) }
+<if_stmt> =
+    "if" "(" <bool_expr> ")" "{"
+        <stmt_list>
+    "}" [ "else" "{"
+        <stmt_list>
+    "}" ]
 
-<ident> = <letter> { <letter> | <digit> }
-<number> = <digit> { <digit> }
-<letter> = "a" | "b" | ... | "z" | "A" | "B" | ... | "Z"
-<digit> = "0" | "1" | ... | "9"
+<while_stmt> =
+    "while" "(" <bool_expr> ")" "{"
+        <stmt_list>
+    "}"
+
+<input_stmt> =
+    "input" "(" <input_arg_list> ")"
+
+<output_stmt> =
+    "output" "(" <arg_list> ")"
+
+<nested_func_stmt> =
+    <func_def>
+
+<func_call> =
+    <ident> "(" [ <arg_list> ] ")"
+
+<method_call> =
+    <factor> "." <ident> "(" [ <arg_list> ] ")"
+
+<member_access> =
+    <factor> "." <ident>
+
+<arg_list> =
+    <expr> { "," <expr> }
+
+<input_arg_list> =
+    ( <ident> | <array_subscript_expr> | <member_access> )
+    { "," ( <ident> | <array_subscript_expr> | <member_access> ) }
+
+<bool_expr> =
+    <expr> ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) <expr>
+
+<expr> =
+    [ "+" | "-" ] <term> { ( "+" | "-" ) <term> }
+
+<term> =
+    <factor> { ( "*" | "/" | "%" ) <factor> }
+
+<factor> =
+      <ident>
+    | <number>
+    | <float_number>
+    | "this"
+    | "(" <expr> ")"
+    | <func_call>
+    | <method_call>
+    | <member_access>
+    | <array_subscript_expr>
+    | "&" <factor>
+    | "*" <factor>
+
+<array_subscript_expr> =
+    <ident> "[" <array_subscript_list> "]"
+
+<array_subscript_list> =
+    <expr> { "," <expr> }
+
+<type_info> =
+      <base_type>
+    | "[" <dim_list> "]" [ <base_type> ]
+    | "*" <type_info>
+    | <ident>
+
+<base_type> =
+    "int" | "float"
+
+<dim_list> =
+    <number> { "," <number> }
+
+<ident> =
+    <letter> { <letter> | <digit> }
+
+<number> =
+    <digit> { <digit> }
+
+<float_number> =
+    <digit> { <digit> } "." <digit> { <digit> }
+
+<letter> =
+    "a" | "b" | ... | "z" | "A" | "B" | ... | "Z"
+
+<digit> =
+    "0" | "1" | ... | "9"
+
 ```
+
+## ⚠️ Notes & Limitations
+- `this` can only be used inside class methods.
+- Class methods do **not** support overloading.
+- All class fields must be declared explicitly using `let`.
+- No inheritance or access modifiers (`public` / `private`) are supported.
+- Classes are passed by reference-like semantics when used as variables.
+- Member access and method calls are left-associative:
+  `a.b.c()` is parsed as `(a.b).c()`.
+- Class definitions are only allowed at the top level of a program.
+- Nested class definitions are not supported.
+
 
 ## 🛠️ Build Instructions
 ### 🔗 Dependencies
-* LLVM (version >= 16)
+* LLVM (version >= 18)
 * Flex (version == 2.6.4)
 * Bison (version == 3.8.2)
 * Makefile
@@ -305,39 +444,52 @@ The compiler will **automatically detect the first valid `.l25` file** among the
 ## 🗂️ Project Structure
 ```
 L25-Compiler/
-├── ast.cpp
-├── include
-│   ├── ast.h
-│   ├── semanticAnalysis.h
-│   └── symbol.h
-├── lexer.l
 ├── LICENSE
-├── main.cpp
 ├── Makefile
-├── others
-│   ├── banner.png
-│   ├── extension-effect.png
-│   ├── extension.png
-│   ├── logo-light.png
-│   └── logo.png
-├── parser.y
 ├── README.md
+├── ast.cpp
+├── errorReporter.cpp
+├── include
+│   ├── ast.h
+│   ├── errorReporter.h
+│   ├── semanticAnalysis.h
+│   └── symbol.h
+├── lexer.l
+├── main.cpp
+├── others
+│   ├── banner.png
+│   ├── extension-effect.png
+│   ├── extension.png
+│   ├── logo-light.png
+│   └── logo.png
+├── parser.y
 ├── semanticAnalysis.cpp
 ├── symbol.cpp
-└── test
-    ├── test1.l25
-    ├── test10.l25
-    ├── test11.l25
-    ├── test12.l25
-    ├── test13.l25
-    ├── test2.l25
-    ├── test3.l25
-    ├── test4.l25
-    ├── test5.l25
-    ├── test6.l25
-    ├── test7.l25
-    ├── test8.l25
-    └── test9.l25
+├── test
+│   ├── error_class_unknown_member.l25
+│   ├── error_missing_semicolon.l25
+│   ├── error_undeclared_variable.l25
+│   ├── error_wrong_call_arity.l25
+│   ├── test1.l25
+│   ├── test10.l25
+│   ├── test11.l25
+│   ├── test12.l25
+│   ├── test13.l25
+│   ├── test14.l25
+│   ├── test2.l25
+│   ├── test3.l25
+│   ├── test4.l25
+│   ├── test5.l25
+│   ├── test6.l25
+│   ├── test7.l25
+│   ├── test8.l25
+│   ├── test9.l25
+│   ├── test_class_basic.l25
+│   ├── test_class_method_call.l25
+│   ├── test_closure.l25
+│   ├── test_float.l25
+│   └── test_pointer.l25
+└── test.sh
 ```
 
 ## 🧠 About LLVM  
