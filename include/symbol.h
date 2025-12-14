@@ -42,6 +42,7 @@ struct SymbolInfo
     int pointerLevel = 0;               // 指针层级
     bool isFloat = false;               // 浮点标识
     std::string className;              // 类名（用于类及类指针类型）
+    bool hasDestructor = false;         // 类是否定义析构函数
     // 类专用信息
     std::vector<std::pair<std::string, TypeInfo>> classFields; // 记录字段布局
     std::unordered_map<std::string, std::vector<TypeInfo>> methodParamTypes; // 方法参数类型

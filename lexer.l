@@ -42,6 +42,7 @@ ident {letter}({letter}|[0-9])*
 "return"    { updateLocationAndColumn(); return RETURN; }
 "this"      { updateLocationAndColumn(); return THIS; }
 "new"       { updateLocationAndColumn(); return NEW; }
+"delete"    { updateLocationAndColumn(); return DELETE; }
 "null"      { updateLocationAndColumn(); return NULLSIGN; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
 "float"     { updateLocationAndColumn(); return FLOATSIGN; }
@@ -63,6 +64,7 @@ ident {letter}({letter}|[0-9])*
 "*"         { updateLocationAndColumn(); return STAR; }
 "/"         { updateLocationAndColumn(); return DIVIDE; }
 "%"         { updateLocationAndColumn(); return MOD; }
+"~"         { updateLocationAndColumn(); return TILDE; }
 
 "("         { updateLocationAndColumn(); return LPAREN; }
 ")"         { updateLocationAndColumn(); return RPAREN; }

@@ -1,0 +1,21 @@
+program test17 {
+class Box {
+    let value: int;
+    Box() {
+        this.value = 123;
+    }
+    ~Box() {
+        output(this.value);
+    }
+    func set(v: int) {
+        this.value = v;
+    }
+}
+
+main {
+    let box: *Box;
+    box = new Box();
+    box.value = 7;
+    delete box;
+}
+}
