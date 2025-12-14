@@ -2,6 +2,8 @@
 #include "include/errorReporter.h"
 #include <llvm/IR/Type.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/DataLayout.h>
 #include <unordered_map>
 #include <algorithm>
 extern bool hasError;
@@ -67,12 +69,22 @@ static llvm::Type* typeInfoToLLVMValueType(const TypeInfo& typeInfo, llvm::LLVMC
     if (typeInfo.kind == SymbolKind::Pointer) {
         return wrapPointer(scalarType, std::max(1, typeInfo.pointerLevel));
     }
-    return wrapPointer(
-        typeInfo.kind == SymbolKind::Array
-            ? buildArrayType(scalarType, typeInfo.dims)
-            : scalarType,
-        typeInfo.pointerLevel
-    );
+
+    llvm::Type* baseType = nullptr;
+    if (typeInfo.kind == SymbolKind::Array) {
+        baseType = buildArrayType(scalarType, typeInfo.dims);
+    } else if (typeInfo.kind == SymbolKind::Class) {
+        auto it = classStructTypes.find(typeInfo.className);
+        if (it != classStructTypes.end()) {
+            baseType = it->second;
+        }
+    } else {
+        baseType = scalarType;
+    }
+
+    if (!baseType) return nullptr;
+
+    return wrapPointer(baseType, typeInfo.pointerLevel);
 }
 
 static llvm::Value* castValueToType(llvm::Value* value, llvm::Type* targetType, CodeGenContext& ctx)
@@ -97,6 +109,15 @@ static llvm::Value* castValueToType(llvm::Value* value, llvm::Type* targetType, 
         if (srcType->isIntegerTy()) {
             return ctx.builder.CreateIntCast(value, targetType, true, "intcast");
         }
+        if (srcType->isPointerTy()) {
+            unsigned ptrBits = ctx.module.getDataLayout().getPointerSizeInBits();
+            llvm::IntegerType* ptrIntTy = llvm::IntegerType::get(ctx.context, ptrBits ? ptrBits : 64);
+            llvm::Value* casted = ctx.builder.CreatePtrToInt(value, ptrIntTy, "ptrtoint");
+            if (ptrIntTy != targetType) {
+                casted = ctx.builder.CreateIntCast(casted, targetType, true, "intcast");
+            }
+            return casted;
+        }
     }
 
     if (targetType->isPointerTy() && srcType->isPointerTy()) {
@@ -104,10 +125,26 @@ static llvm::Value* castValueToType(llvm::Value* value, llvm::Type* targetType, 
     }
 
     if (targetType->isPointerTy() && srcType->isIntegerTy()) {
-        return ctx.builder.CreateIntToPtr(value, targetType, "inttoptr");
+        unsigned ptrBits = ctx.module.getDataLayout().getPointerSizeInBits();
+        llvm::IntegerType* ptrIntTy = llvm::IntegerType::get(ctx.context, ptrBits ? ptrBits : 64);
+        llvm::Value* casted = value;
+        if (srcType != ptrIntTy) {
+            casted = ctx.builder.CreateIntCast(value, ptrIntTy, true, "intcast");
+        }
+        return ctx.builder.CreateIntToPtr(casted, targetType, "inttoptr");
     }
 
     return value;
+}
+
+static std::string buildCtorName(const std::string& className, size_t paramCount)
+{
+    return className + ".__ctor" + std::to_string(paramCount);
+}
+
+static std::string buildDtorName(const std::string& className)
+{
+    return className + ".__dtor";
 }
 
 static TypeInfo typeInfoFromSymbol(const SymbolInfo* symbol)
@@ -188,6 +225,9 @@ TypeInfo evaluateExprType(const Expr* expr)
             }
         }
         return TypeInfo{ SymbolKind::Invalid, {}, 0 };
+    }
+    if (auto newExpr = dynamic_cast<const NewExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Class, {}, 1, false, newExpr->className->ident };
     }
     if (dynamic_cast<const MethodCallExpr*>(expr)) {
         return TypeInfo{ SymbolKind::Int, {}, 0 };
@@ -315,8 +355,124 @@ void CtorDecl::print(int indent) const
 
 llvm::Value* CtorDecl::codeGen(CodeGenContext& ctx) const
 {
-    reportError("暂未实现构造函数的代码生成");
-    return nullptr;
+    if (currentClassNameCodegen.empty()) {
+        reportError("构造函数未关联类");
+        return nullptr;
+    }
+
+    llvm::StructType* classTy = classStructTypes[currentClassNameCodegen];
+    if (!classTy) {
+        reportError("找不到类类型：" + currentClassNameCodegen);
+        return nullptr;
+    }
+
+    std::vector<llvm::Type*> argTypes;
+    argTypes.push_back(llvm::PointerType::get(classTy, 0));
+    if (params) {
+        for (const auto& param : params->params) {
+            llvm::Type* argType = typeInfoToLLVMType(param->type, ctx.context, true);
+            argTypes.push_back(argType);
+        }
+    }
+
+    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), argTypes, false);
+    size_t paramCount = params ? params->params.size() : 0;
+    std::string funcName = buildCtorName(currentClassNameCodegen, paramCount);
+    llvm::Function* function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, funcName, ctx.module);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
+    ctx.builder.SetInsertPoint(entry);
+
+    int idx = 0;
+    for (auto& arg : function->args()) {
+        if (idx == 0) {
+            arg.setName("this");
+            SymbolInfo* thisInfo = bodyScope ? bodyScope->lookupLocal("this") : nullptr;
+            if (thisInfo) {
+                llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, "this.addr");
+                ctx.builder.CreateStore(&arg, alloca);
+                thisInfo->addr = alloca;
+                thisInfo->value = &arg;
+            }
+        } else {
+            arg.setName(params->params[idx - 1]->ident);
+            SymbolInfo* argInfo = bodyScope ? bodyScope->lookupLocal(arg.getName().str()) : nullptr;
+            if (argInfo) {
+                llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
+                ctx.builder.CreateStore(&arg, alloca);
+                argInfo->addr = alloca;
+                argInfo->value = &arg;
+            }
+        }
+        idx++;
+    }
+
+    if (body) {
+        for (const auto& stmt : body->stmts) {
+            stmt->codeGen(ctx);
+        }
+    }
+
+    ctx.builder.CreateRetVoid();
+    return function;
+}
+
+// 析构函数
+DtorDecl::DtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<StmtList> body)
+    : name(std::move(name))
+    , body(std::move(body))
+    , bodyScope(nullptr) {}
+
+void DtorDecl::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "DtorDecl" << std::endl;
+    name->print(indent + 2);
+    if (body) body->print(indent + 2);
+}
+
+llvm::Value* DtorDecl::codeGen(CodeGenContext& ctx) const
+{
+    if (currentClassNameCodegen.empty()) {
+        reportError("析构函数未关联类");
+        return nullptr;
+    }
+
+    llvm::StructType* classTy = classStructTypes[currentClassNameCodegen];
+    if (!classTy) {
+        reportError("找不到类类型：" + currentClassNameCodegen);
+        return nullptr;
+    }
+
+    std::vector<llvm::Type*> argTypes;
+    argTypes.push_back(llvm::PointerType::get(classTy, 0));
+
+    llvm::FunctionType* funcType = llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), argTypes, false);
+    std::string funcName = buildDtorName(currentClassNameCodegen);
+    llvm::Function* function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, funcName, ctx.module);
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
+    ctx.builder.SetInsertPoint(entry);
+
+    auto argIt = function->arg_begin();
+    if (argIt != function->arg_end()) {
+        argIt->setName("this");
+        SymbolInfo* thisInfo = bodyScope ? bodyScope->lookupLocal("this") : nullptr;
+        if (thisInfo) {
+            llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(argIt->getType(), nullptr, "this.addr");
+            ctx.builder.CreateStore(&*argIt, alloca);
+            thisInfo->addr = alloca;
+            thisInfo->value = &*argIt;
+        }
+    }
+
+    if (body) {
+        for (const auto& stmt : body->stmts) {
+            stmt->codeGen(ctx);
+        }
+    }
+
+    ctx.builder.CreateRetVoid();
+    return function;
 }
 
 // 方法
@@ -406,12 +562,14 @@ ClassDecl::ClassDecl(std::unique_ptr<IdentExpr> name,
                      std::unique_ptr<IdentExpr> baseClass,
                      std::vector<std::unique_ptr<FieldDecl>> fields,
                      std::vector<std::unique_ptr<MethodDecl>> methods,
-                     std::vector<std::unique_ptr<CtorDecl>> ctors)
+                     std::vector<std::unique_ptr<CtorDecl>> ctors,
+                     std::unique_ptr<DtorDecl> dtor)
     : name(std::move(name))
     , baseClass(std::move(baseClass))
     , fields(std::move(fields))
     , methods(std::move(methods))
-    , ctors(std::move(ctors)) {}
+    , ctors(std::move(ctors))
+    , dtor(std::move(dtor)) {}
 
 void ClassDecl::print(int indent) const
 {
@@ -426,6 +584,9 @@ void ClassDecl::print(int indent) const
     for (const auto& ctor : ctors) {
         ctor->print(indent + 2);
     }
+    if (dtor) {
+        dtor->print(indent + 2);
+    }
     for (const auto& method : methods) {
         method->print(indent + 2);
     }
@@ -433,6 +594,15 @@ void ClassDecl::print(int indent) const
 
 llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
 {
+    llvm::StructType* structTy = nullptr;
+    auto structIt = classStructTypes.find(name->ident);
+    if (structIt != classStructTypes.end()) {
+        structTy = structIt->second;
+    } else {
+        structTy = llvm::StructType::create(ctx.context, name->ident);
+        classStructTypes[name->ident] = structTy;
+    }
+
     std::vector<llvm::Type*> fieldTypes;
     std::vector<std::pair<std::string, TypeInfo>> layout;
     for (const auto& field : fields) {
@@ -444,13 +614,17 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
         fieldTypes.push_back(fieldType);
         layout.emplace_back(field->name->ident, field->type);
     }
-    llvm::StructType* structTy = llvm::StructType::create(ctx.context, name->ident);
     structTy->setBody(fieldTypes, false);
-    classStructTypes[name->ident] = structTy;
     classFieldLayouts[name->ident] = layout;
 
     std::string saved = currentClassNameCodegen;
     currentClassNameCodegen = name->ident;
+    for (const auto& ctor : ctors) {
+        ctor->codeGen(ctx);
+    }
+    if (dtor) {
+        dtor->codeGen(ctx);
+    }
     for (const auto& method : methods) {
         method->codeGen(ctx);
     }
@@ -465,7 +639,7 @@ Func::Func(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, s
     , stmts(std::move(stmts))
     , return_value(std::move(return_value)) {}
 
-void Func::print(int indent) const 
+void Func::print(int indent) const
 {
     std::cout << std::string(indent, ' ') << "Func" << std::endl;
     name->print(indent + 2);
@@ -473,7 +647,9 @@ void Func::print(int indent) const
         params->print(indent + 2);
     }
     stmts->print(indent + 2);
-    return_value->print(indent + 2);
+    if (return_value) {
+        return_value->print(indent + 2);
+    }
 }
 
 llvm::Value* Func::codeGen(CodeGenContext& ctx) const  
@@ -577,7 +753,7 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    llvm::Value* retVal = return_value->codeGen(ctx);
+    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
     retVal = castValueToType(retVal, llvm::Type::getInt32Ty(ctx.context), ctx);
     ctx.builder.CreateRet(retVal);
 
@@ -1091,6 +1267,65 @@ llvm::Value* OutputStmt::codeGen(CodeGenContext& ctx) const {
     return nullptr;
 }
 
+// delete 语句
+DeleteStmt::DeleteStmt(std::unique_ptr<Expr> target)
+    : target(std::move(target)) {}
+
+void DeleteStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "DeleteStmt" << std::endl;
+    if (target) target->print(indent + 2);
+}
+
+llvm::Value* DeleteStmt::codeGen(CodeGenContext& ctx) const
+{
+    if (!target) return nullptr;
+    llvm::Value* rawTarget = target->codeGen(ctx);
+    if (!rawTarget) return nullptr;
+
+    TypeInfo type = evaluateExprType(target.get());
+    if (type.kind != SymbolKind::Class || type.pointerLevel <= 0) {
+        reportError("delete 目标必须是类指针");
+        return nullptr;
+    }
+
+    llvm::StructType* classTy = classStructTypes[type.className];
+    if (!classTy) {
+        reportError("找不到类类型：" + type.className);
+        return nullptr;
+    }
+
+    llvm::PointerType* classPtrTy = llvm::PointerType::get(classTy, 0);
+    llvm::Value* typedPtr = rawTarget;
+    if (typedPtr->getType() != classPtrTy) {
+        typedPtr = ctx.builder.CreateBitCast(typedPtr, classPtrTy, "cls.ptr");
+    }
+
+    llvm::Function* parentFunc = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* deleteBB = llvm::BasicBlock::Create(ctx.context, "delete.body", parentFunc);
+    llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "delete.cont", parentFunc);
+    llvm::Value* isNull = ctx.builder.CreateICmpEQ(typedPtr, llvm::ConstantPointerNull::get(classPtrTy));
+    ctx.builder.CreateCondBr(isNull, contBB, deleteBB);
+
+    ctx.builder.SetInsertPoint(deleteBB);
+    std::string dtorName = buildDtorName(type.className);
+    if (llvm::Function* dtorFunc = ctx.module.getFunction(dtorName)) {
+        ctx.builder.CreateCall(dtorFunc, { typedPtr });
+    }
+
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction(
+        "free",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), { i8PtrTy }, false)
+    );
+    llvm::Value* castPtr = ctx.builder.CreateBitCast(typedPtr, i8PtrTy);
+    ctx.builder.CreateCall(freeFn, { castPtr });
+    ctx.builder.CreateBr(contBB);
+
+    ctx.builder.SetInsertPoint(contBB);
+    return nullptr;
+}
+
 // Bool表达式节点
 BoolExpr::BoolExpr(std::string symbol, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs)
     : symbol(symbol)
@@ -1114,7 +1349,28 @@ llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const
         return nullptr;
     }
 
-    bool useFloat = lhsVal->getType()->isFloatingPointTy() || rhsVal->getType()->isFloatingPointTy();
+    llvm::Type* lhsTy = lhsVal->getType();
+    llvm::Type* rhsTy = rhsVal->getType();
+    bool useFloat = lhsTy->isFloatingPointTy() || rhsTy->isFloatingPointTy();
+    bool usePointer = lhsTy->isPointerTy() || rhsTy->isPointerTy();
+
+    if (usePointer && !useFloat) {
+        llvm::Type* targetPtrTy = lhsTy->isPointerTy() ? lhsTy : rhsTy;
+        lhsVal = castValueToType(lhsVal, targetPtrTy, ctx);
+        rhsVal = castValueToType(rhsVal, targetPtrTy, ctx);
+        if (!lhsVal || !rhsVal) {
+            reportError("布尔表达式左右子表达式生成失败");
+            return nullptr;
+        }
+        if (symbol == "==") {
+            return ctx.builder.CreateICmpEQ(lhsVal, rhsVal, "ptr_cmpeq");
+        } else if (symbol == "!=") {
+            return ctx.builder.CreateICmpNE(lhsVal, rhsVal, "ptr_cmpne");
+        }
+        reportError("指针仅支持==和!=比较");
+        return nullptr;
+    }
+
     if (useFloat) {
         lhsVal = castValueToType(lhsVal, llvm::Type::getFloatTy(ctx.context), ctx);
         rhsVal = castValueToType(rhsVal, llvm::Type::getFloatTy(ctx.context), ctx);
@@ -1631,8 +1887,60 @@ void NewExpr::print(int indent) const
 
 llvm::Value* NewExpr::codeGen(CodeGenContext& ctx) const
 {
-    reportError("暂未实现 new 表达式的代码生成");
-    return nullptr;
+    llvm::StructType* classTy = classStructTypes[className->ident];
+    if (!classTy) {
+        reportError("无法找到类类型：" + className->ident);
+        return nullptr;
+    }
+
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* sizeTy = llvm::Type::getInt64Ty(ctx.context);
+    llvm::FunctionCallee mallocFn = ctx.module.getOrInsertFunction(
+        "malloc",
+        llvm::FunctionType::get(i8PtrTy, { sizeTy }, false)
+    );
+
+    uint64_t allocSize = ctx.module.getDataLayout().getTypeAllocSize(classTy);
+    llvm::Value* sizeVal = llvm::ConstantInt::get(sizeTy, allocSize);
+    llvm::Value* rawPtr = ctx.builder.CreateCall(mallocFn, { sizeVal }, "rawobj");
+    llvm::Value* typedPtr = ctx.builder.CreateBitCast(rawPtr, llvm::PointerType::get(classTy, 0), "obj");
+
+    size_t argCount = args ? args->args.size() : 0;
+    std::string ctorName = buildCtorName(className->ident, argCount);
+    if (llvm::Function* ctorFunc = ctx.module.getFunction(ctorName)) {
+        std::vector<llvm::Value*> callArgs;
+        callArgs.push_back(typedPtr);
+        if (args) {
+            for (size_t i = 0; i < args->args.size(); ++i) {
+                llvm::Value* argVal = args->args[i]->codeGen(ctx);
+                if (!argVal) return nullptr;
+                llvm::Type* expectedType = ctorFunc->getFunctionType()->getParamType(static_cast<unsigned>(i + 1));
+                argVal = castValueToType(argVal, expectedType, ctx);
+                callArgs.push_back(argVal);
+            }
+        }
+        ctx.builder.CreateCall(ctorFunc, callArgs);
+    } else {
+        if (argCount > 0) {
+            reportError("未找到匹配的构造函数：" + ctorName);
+            return nullptr;
+        }
+        auto memsetFn = llvm::Intrinsic::getDeclaration(
+            &ctx.module,
+            llvm::Intrinsic::memset,
+            { llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0), llvm::Type::getInt64Ty(ctx.context) }
+        );
+        llvm::Value* zeroVal = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        llvm::Value* isVolatile = llvm::ConstantInt::getFalse(ctx.context);
+        ctx.builder.CreateCall(memsetFn, {
+            ctx.builder.CreateBitCast(typedPtr, llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0)),
+            zeroVal,
+            sizeVal,
+            isVolatile
+        });
+    }
+
+    return typedPtr;
 }
 
 // 标识符节点

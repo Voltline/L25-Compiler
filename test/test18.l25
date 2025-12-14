@@ -1,0 +1,91 @@
+program linked_list {
+class Node {
+    let value: int;
+    let next: *Node;
+
+    Node(v) {
+        this.value = v;
+        this.next = 0;
+    }
+
+    ~Node() {
+    }
+}
+
+class List {
+    let head: *Node;
+
+    List() {
+        this.head = 0;
+    }
+
+    ~List() {
+        let cur: *Node;
+        cur = this.head;
+        while (cur != 0) {
+            let nextNode: *Node;
+            nextNode = cur.next;
+            cur.next = 0;
+            delete cur;
+            cur = nextNode;
+        };
+    }
+
+    func push_front(v) {
+        let n: *Node;
+        n = new Node(v);
+        n.next = this.head;
+        this.head = n;
+    }
+
+    func push_back(v) {
+        let n: *Node;
+        n = new Node(v);
+        if (this.head == 0) {
+            this.head = n;
+        } else {
+            let cur: *Node;
+            cur = this.head;
+            while (cur.next != 0) {
+                cur = cur.next;
+            };
+            cur.next = n;
+        };
+    }
+
+    func sum() {
+        let cur: *Node;
+        cur = this.head;
+        let acc = 0;
+        while (cur != 0) {
+            acc = acc + cur.value;
+            cur = cur.next;
+        };
+        return acc;
+    }
+
+    func output_all() {
+        let cur: *Node;
+        cur = this.head;
+        while (cur != 0) {
+            output(cur.value);
+            cur = cur.next;
+        };
+    }
+}
+
+main {
+    let list: *List;
+    list = new List();
+    let tmp;
+
+    tmp = list.push_back(1);
+    tmp = list.push_back(2);
+    tmp = list.push_front(0);
+    tmp = list.push_back(3);
+    tmp = list.output_all();
+    output(list.sum());
+
+    delete list;
+}
+}

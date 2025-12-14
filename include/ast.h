@@ -132,8 +132,23 @@ struct CtorDecl: public ASTNode
     std::unique_ptr<IdentExpr> name;
     std::unique_ptr<ParamList> params;
     std::unique_ptr<StmtList> body;
+    Scope* bodyScope = nullptr;
 
     CtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<ParamList> params, std::unique_ptr<StmtList> body);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 析构函数声明
+struct DtorDecl: public ASTNode
+{
+    std::unique_ptr<IdentExpr> name;
+    std::unique_ptr<StmtList> body;
+    Scope* bodyScope = nullptr;
+
+    DtorDecl(std::unique_ptr<IdentExpr> name, std::unique_ptr<StmtList> body);
 
     void print(int indent = 0) const override;
 
@@ -164,12 +179,14 @@ struct ClassDecl: public ASTNode
     std::vector<std::unique_ptr<FieldDecl>> fields;
     std::vector<std::unique_ptr<MethodDecl>> methods;
     std::vector<std::unique_ptr<CtorDecl>> ctors;
+    std::unique_ptr<DtorDecl> dtor;
 
     ClassDecl(std::unique_ptr<IdentExpr> name,
               std::unique_ptr<IdentExpr> baseClass,
               std::vector<std::unique_ptr<FieldDecl>> fields,
               std::vector<std::unique_ptr<MethodDecl>> methods,
-              std::vector<std::unique_ptr<CtorDecl>> ctors);
+              std::vector<std::unique_ptr<CtorDecl>> ctors,
+              std::unique_ptr<DtorDecl> dtor = nullptr);
 
     void print(int indent = 0) const override;
 
@@ -295,6 +312,18 @@ struct OutputStmt: public Stmt
     OutputStmt(std::vector<std::unique_ptr<Expr>> idents);
 
     OutputStmt(std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// delete 语句
+struct DeleteStmt: public Stmt
+{
+    std::unique_ptr<Expr> target;
+
+    explicit DeleteStmt(std::unique_ptr<Expr> target);
 
     void print(int indent = 0) const override;
 
