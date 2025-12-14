@@ -1,0 +1,38 @@
+program class_complicated {
+    class PCB {
+        let pid: int;
+        let state: int;
+        let priority: int;
+
+        func init(pid: int, state: int, priority: int) {
+            this.pid = pid;
+            this.state = state;
+            this.priority = priority;
+            return 0;
+        }
+
+        func display() {
+            output(this.pid, this.state, this.priority);
+            return 0;
+        }
+
+        func setState(newState: int) {
+            this.state = newState;
+            return this.state;
+        }
+
+        func setPriority(newPriority: int) {
+            this.priority = newPriority;
+            return this.priority;
+        }
+    }
+
+    main {
+        let pcb1: PCB;
+        let res = pcb1.init(1001, 0, 5);
+        res = pcb1.display();
+        res = pcb1.setState(1);
+        res = pcb1.setPriority(10);
+        res = pcb1.display();
+    }
+}
