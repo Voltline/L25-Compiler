@@ -5,7 +5,7 @@ class Node {
 
     Node(v) {
         this.value = v;
-        this.next = 0;
+        this.next = nil;
     }
 
     ~Node() {
@@ -16,16 +16,16 @@ class List {
     let head: *Node;
 
     List() {
-        this.head = 0;
+        this.head = nil;
     }
 
     ~List() {
         let cur: *Node;
         cur = this.head;
-        while (cur != 0) {
+        while (cur != nil) {
             let nextNode: *Node;
             nextNode = cur.next;
-            cur.next = 0;
+            cur.next = nil;
             delete cur;
             cur = nextNode;
         };
@@ -41,12 +41,12 @@ class List {
     func push_back(v) {
         let n: *Node;
         n = new Node(v);
-        if (this.head == 0) {
+        if (this.head == nil) {
             this.head = n;
         } else {
             let cur: *Node;
             cur = this.head;
-            while (cur.next != 0) {
+            while (cur.next != nil) {
                 cur = cur.next;
             };
             cur.next = n;
@@ -57,7 +57,7 @@ class List {
         let cur: *Node;
         cur = this.head;
         let acc = 0;
-        while (cur != 0) {
+        while (cur != nil) {
             acc = acc + cur.value;
             cur = cur.next;
         };
@@ -67,7 +67,7 @@ class List {
     func output_all() {
         let cur: *Node;
         cur = this.head;
-        while (cur != 0) {
+        while (cur != nil) {
             output(cur.value);
             cur = cur.next;
         };
