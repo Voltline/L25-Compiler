@@ -18,7 +18,7 @@
 > 🚧 A series of extensions to the original L25 grammar have now been implemented.
 
 ### ✨Features
-* 🔁 *Nested Functions within Functions(without Closure)*:
+* 🔁 *Nested Functions within Functions*:
 ```L25
 func f1(a) {
     func f2(b) {
@@ -29,7 +29,6 @@ func f1(a) {
     return d;
 }
 ```
-&emsp; 💡 Although nested functions are allowed, inner functions **cannot access symbols in the outer scope**.
 
 * 🎯 *Typed return values with concise arrow syntax*:
 ```L25
