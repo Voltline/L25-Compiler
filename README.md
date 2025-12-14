@@ -532,6 +532,7 @@ The compiler will **automatically detect the first valid `.l25` file** among the
 ## 🗂️ Project Structure
 ```
 L25-Compiler/
+├── AGENTS.md
 ├── LICENSE
 ├── Makefile
 ├── README.md
@@ -566,7 +567,12 @@ L25-Compiler/
 │   ├── test13.l25
 │   ├── test14.l25
 │   ├── test15.l25
+│   ├── test16.l25
+│   ├── test17.l25
+│   ├── test18.l25
+│   ├── test19.l25
 │   ├── test2.l25
+│   ├── test20.l25
 │   ├── test3.l25
 │   ├── test4.l25
 │   ├── test5.l25
