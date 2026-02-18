@@ -1,0 +1,47 @@
+program test_string {
+    main {
+        // 字符串字面量与自动推导
+        let hello = "Hello";
+        let world = "World";
+
+        // 字符串输出
+        output(hello);
+        output(world);
+
+        // 字符串拼接
+        let greeting = hello + " " + world + "!";
+        output(greeting);
+
+        // strlen
+        let len = strlen(greeting);
+        output(len);
+
+        // 字符串比较
+        let a = "abc";
+        let b = "abc";
+        let c = "xyz";
+        if (a == b) {
+            output(1);
+        } else {
+            output(0);
+        };
+        if (a != c) {
+            output(1);
+        } else {
+            output(0);
+        };
+        if (a == c) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // 显式 string 类型声明
+        let msg: string = "typed string";
+        output(msg);
+
+        // strlen on typed
+        let msgLen = strlen(msg);
+        output(msgLen);
+    }
+}

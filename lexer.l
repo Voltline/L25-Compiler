@@ -47,9 +47,42 @@ ident {letter}({letter}|[0-9])*
 "null"      { updateLocationAndColumn(); return NIL; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }
 "float"     { updateLocationAndColumn(); return FLOATSIGN; }
+"string"    { updateLocationAndColumn(); return STRINGSIGN; }
+"strlen"    { updateLocationAndColumn(); return STRLEN; }
+"typename"  { updateLocationAndColumn(); return TYPENAME_KW; }
+"fieldcount" { updateLocationAndColumn(); return FIELDCOUNT; }
+"methodcount" { updateLocationAndColumn(); return METHODCOUNT; }
+"fieldname" { updateLocationAndColumn(); return FIELDNAME; }
+"methodname" { updateLocationAndColumn(); return METHODNAME; }
+"invoke"  { updateLocationAndColumn(); return INVOKE; }
 
 {floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }
+
+\"([^\"\\]|\\.)*\"  {
+                updateLocationAndColumn();
+                std::string raw(yytext + 1, yyleng - 2);
+                std::string processed;
+                for (size_t i = 0; i < raw.size(); ++i) {
+                    if (raw[i] == '\\' && i + 1 < raw.size()) {
+                        ++i;
+                        switch (raw[i]) {
+                            case 'n': processed += '\n'; break;
+                            case 't': processed += '\t'; break;
+                            case 'r': processed += '\r'; break;
+                            case '\\': processed += '\\'; break;
+                            case '\"': processed += '\"'; break;
+                            case '0': processed += '\0'; break;
+                            default: processed += raw[i]; break;
+                        }
+                    } else {
+                        processed += raw[i];
+                    }
+                }
+                yylval.strval = new std::string(processed);
+                return STRING_LITERAL;
+            }
+
 {ident}     { updateLocationAndColumn(); yylval.ident = new std::string{ yytext }; return IDENT; }
 
 "=="        { updateLocationAndColumn(); return EQ; }

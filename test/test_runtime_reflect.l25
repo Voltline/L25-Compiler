@@ -1,0 +1,44 @@
+program runtime_reflect {
+    class Animal {
+        let name: int;
+        let age: int;
+        let weight: int;
+
+        func speak() {
+            return 1;
+        }
+
+        func eat() {
+            return 2;
+        }
+
+        func sleep() {
+            return 3;
+        }
+    }
+
+    main {
+        let a: Animal;
+
+        // 运行时遍历所有字段名
+        let fc = fieldcount(a);
+        output(fc);
+        let i = 0;
+        while (i < fc) {
+            output(fieldname(a, i));
+            i = i + 1;
+        };
+
+        // 运行时遍历所有方法名
+        let mc = methodcount(a);
+        output(mc);
+        let j = 0;
+        while (j < mc) {
+            output(methodname(a, j));
+            j = j + 1;
+        };
+
+        // 类型名
+        output(typename(a));
+    }
+}

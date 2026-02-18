@@ -1,0 +1,60 @@
+program invoke_test {
+    class Calculator {
+        let value: int;
+
+        Calculator(v) {
+            this.value = v;
+        }
+
+        ~Calculator() {}
+
+        func add(x) {
+            this.value = this.value + x;
+            return this.value;
+        }
+
+        func sub(x) {
+            this.value = this.value - x;
+            return this.value;
+        }
+
+        func get() {
+            return this.value;
+        }
+
+        func reset() {
+            this.value = 0;
+            return 0;
+        }
+    }
+
+    main {
+        let c: *Calculator;
+        c = new Calculator(10);
+
+        // 编译期方法名调用
+        output(invoke(c, "add", 5));      // 15
+        output(invoke(c, "sub", 3));      // 12
+        output(invoke(c, "get"));         // 12
+        output(invoke(c, "reset"));       // 0
+        output(invoke(c, "get"));         // 0
+
+        // 运行时：用 methodname 获取方法名，再 invoke
+        let i = 0;
+        let mc = methodcount(c);
+        invoke(c, "add", 100);            // value = 100
+        while (i < mc) {
+            let name = methodname(c, i);
+            // 只调用不带参数的方法
+            if (i == 2) {
+                output(invoke(c, name));  // get -> 100
+            };
+            if (i == 3) {
+                output(invoke(c, name));  // reset -> 0
+            };
+            i = i + 1;
+        };
+
+        delete c;
+    }
+}

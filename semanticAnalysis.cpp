@@ -71,6 +71,12 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
         declareSymbol(className, classInfo);
         classFieldLayouts[className] = classInfo.classFields;
         classMethodReturnTypes[className] = classInfo.methodReturnTypes;
+        // 按定义顺序记录方法名（供反射使用）
+        std::vector<std::string> methodNames;
+        for (const auto& method : cls->methods) {
+            methodNames.push_back(method->name->ident);
+        }
+        classMethodNames[className] = methodNames;
         classDecls[className] = cls.get();
     }
 
@@ -238,7 +244,17 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         if (checkSameScopeSymbolExists(decl->name->ident)) {
             reportError(*decl, "变量重定义：" + decl->name->ident);
         } else {
-            SymbolInfo info{ decl->name->ident, decl->name->type };
+            TypeInfo declType = decl->name->type;
+            // 自动推导：如果类型为默认 Int 且 RHS 是字符串字面量，推导为 String
+            if (declType.kind == SymbolKind::Int && declType.pointerLevel == 0 && decl->expr) {
+                TypeInfo rhsType = evaluateExprType(decl->expr.get());
+                if (rhsType.kind == SymbolKind::String) {
+                    declType = TypeInfo{ SymbolKind::String, {}, 0, false };
+                    // 同步更新 AST 节点的类型
+                    const_cast<IdentExpr*>(decl->name.get())->type = declType;
+                }
+            }
+            SymbolInfo info{ decl->name->ident, declType };
             declareSymbol(decl->name->ident, info);
         }
         if (decl->expr) {
@@ -350,6 +366,10 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         SymbolInfo funcInfo{ funcName, *funcDefStmt };
         declareSymbol(funcName, funcInfo);
         analyzeFunc(*funcDefStmt);
+    } else if (auto exprStmt = dynamic_cast<const ExprStmt*>(&stmt)) {
+        if (exprStmt->expr) {
+            analyzeExpr(*exprStmt->expr);
+        }
     }
 }
 
@@ -536,29 +556,27 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
                 analyzeExpr(*arg);
             }
         }
-    } else if (auto newExpr = dynamic_cast<const NewExpr*>(&expr)) {
-        const std::string className = newExpr->className->ident;
-        auto clsIt = classDecls.find(className);
-        if (clsIt == classDecls.end()) {
-            reportError(*newExpr, "未知的类：" + className);
-            return;
-        }
-
-        size_t argCount = newExpr->args ? newExpr->args->args.size() : 0;
-        bool hasMatchingCtor = false;
-        for (const auto& ctor : clsIt->second->ctors) {
-            size_t paramCount = ctor->params ? ctor->params->params.size() : 0;
-            if (paramCount == argCount) {
-                hasMatchingCtor = true;
-                break;
-            }
-        }
-        if (argCount > 0 && !hasMatchingCtor) {
-            reportError(*newExpr, "未找到匹配参数数量的构造函数");
-        }
-
-        if (newExpr->args) {
-            for (const auto& arg : newExpr->args->args) {
+    } else if (auto strLit = dynamic_cast<const StringLiteralExpr*>(&expr)) {
+        // 字符串字面量，无需额外分析
+    } else if (auto strlenExpr = dynamic_cast<const StrlenExpr*>(&expr)) {
+        analyzeExpr(*strlenExpr->target);
+    } else if (auto tnExpr = dynamic_cast<const TypenameExpr*>(&expr)) {
+        analyzeExpr(*tnExpr->target);
+    } else if (auto fcExpr = dynamic_cast<const FieldCountExpr*>(&expr)) {
+        analyzeExpr(*fcExpr->target);
+    } else if (auto mcExpr = dynamic_cast<const MethodCountExpr*>(&expr)) {
+        analyzeExpr(*mcExpr->target);
+    } else if (auto fnExpr = dynamic_cast<const FieldNameExpr*>(&expr)) {
+        analyzeExpr(*fnExpr->target);
+        analyzeExpr(*fnExpr->index);
+    } else if (auto mnExpr = dynamic_cast<const MethodNameExpr*>(&expr)) {
+        analyzeExpr(*mnExpr->target);
+        analyzeExpr(*mnExpr->index);
+    } else if (auto invokeExpr = dynamic_cast<const InvokeExpr*>(&expr)) {
+        analyzeExpr(*invokeExpr->target);
+        analyzeExpr(*invokeExpr->methodName);
+        if (invokeExpr->args) {
+            for (const auto& arg : invokeExpr->args->args) {
                 analyzeExpr(*arg);
             }
         }

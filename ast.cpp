@@ -10,7 +10,53 @@ extern bool hasError;
 std::unordered_map<std::string, int> functionMap;
 std::unordered_map<std::string, llvm::StructType*> classStructTypes;
 std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
+
+// ===== L25 String 结构体类型 { i32 len, i8* data } =====
+llvm::StructType* getL25StringType(llvm::LLVMContext& ctx) {
+    llvm::StructType* ty = llvm::StructType::getTypeByName(ctx, "__l25_string");
+    if (!ty) {
+        ty = llvm::StructType::create(ctx, "__l25_string");
+        ty->setBody({
+            llvm::Type::getInt32Ty(ctx),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0)
+        }, false);
+    }
+    return ty;
+}
+
+// 确保 libc 辅助函数已声明
+static void ensureStringRuntimeDeclared(CodeGenContext& ctx) {
+    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+    auto* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+
+    if (!ctx.module.getFunction("malloc")) {
+        ctx.module.getOrInsertFunction("malloc",
+            llvm::FunctionType::get(i8PtrTy, { i64Ty }, false));
+    }
+    if (!ctx.module.getFunction("free")) {
+        ctx.module.getOrInsertFunction("free",
+            llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), { i8PtrTy }, false));
+    }
+    if (!ctx.module.getFunction("strlen")) {
+        ctx.module.getOrInsertFunction("strlen",
+            llvm::FunctionType::get(i64Ty, { i8PtrTy }, false));
+    }
+    if (!ctx.module.getFunction("strcmp")) {
+        ctx.module.getOrInsertFunction("strcmp",
+            llvm::FunctionType::get(i32Ty, { i8PtrTy, i8PtrTy }, false));
+    }
+    if (!ctx.module.getFunction("memcpy")) {
+        ctx.module.getOrInsertFunction("memcpy",
+            llvm::FunctionType::get(i8PtrTy, { i8PtrTy, i8PtrTy, i64Ty }, false));
+    }
+    if (!ctx.module.getFunction("snprintf")) {
+        ctx.module.getOrInsertFunction("snprintf",
+            llvm::FunctionType::get(i32Ty, { i8PtrTy, i64Ty, i8PtrTy }, true));
+    }
+}
 std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
+std::unordered_map<std::string, std::vector<std::string>> classMethodNames;
 static std::string currentClassNameCodegen;
 
 static llvm::Type* wrapPointer(llvm::Type* base, int pointerLevel)
@@ -49,6 +95,8 @@ static llvm::Type* typeInfoToLLVMType(const TypeInfo& typeInfo, llvm::LLVMContex
         if (it != classStructTypes.end()) {
             baseType = it->second;
         }
+    } else if (typeInfo.kind == SymbolKind::String) {
+        baseType = getL25StringType(ctx);
     }
 
     if (!baseType) return nullptr;
@@ -79,6 +127,8 @@ static llvm::Type* typeInfoToLLVMValueType(const TypeInfo& typeInfo, llvm::LLVMC
         if (it != classStructTypes.end()) {
             baseType = it->second;
         }
+    } else if (typeInfo.kind == SymbolKind::String) {
+        baseType = getL25StringType(ctx);
     } else {
         baseType = scalarType;
     }
@@ -188,6 +238,30 @@ TypeInfo evaluateExprType(const Expr* expr)
     if (dynamic_cast<const NilExpr*>(expr)) {
         return TypeInfo{ SymbolKind::Pointer, {}, 1, false };
     }
+    if (dynamic_cast<const StringLiteralExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::String, {}, 0, false };
+    }
+    if (dynamic_cast<const StrlenExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    if (dynamic_cast<const TypenameExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::String, {}, 0, false };
+    }
+    if (dynamic_cast<const FieldCountExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    if (dynamic_cast<const MethodCountExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    if (dynamic_cast<const FieldNameExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::String, {}, 0, false };
+    }
+    if (dynamic_cast<const MethodNameExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::String, {}, 0, false };
+    }
+    if (dynamic_cast<const InvokeExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
     if (auto ident = dynamic_cast<const IdentExpr*>(expr)) {
         SymbolInfo* symbol = ident->scope ? ident->scope->lookup(ident->ident) : nullptr;
         if (symbol) return typeInfoFromSymbol(symbol);
@@ -228,6 +302,10 @@ TypeInfo evaluateExprType(const Expr* expr)
     if (auto binary = dynamic_cast<const BinaryExpr*>(expr)) {
         TypeInfo lhsType = evaluateExprType(binary->lhs.get());
         TypeInfo rhsType = evaluateExprType(binary->rhs.get());
+        // 字符串拼接结果为 String
+        if (lhsType.kind == SymbolKind::String || rhsType.kind == SymbolKind::String) {
+            return TypeInfo{ SymbolKind::String, {}, 0, false };
+        }
         bool isFloatResult = lhsType.isFloat || rhsType.isFloat || lhsType.kind == SymbolKind::Float || rhsType.kind == SymbolKind::Float;
         if (isFloatResult) {
             return TypeInfo{ SymbolKind::Float, {}, 0, true };
@@ -339,6 +417,9 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
         );
         llvm::Function::Create(scanfType, llvm::Function::ExternalLinkage, "scanf", ctx.module);
     }
+
+    // 声明字符串运行时辅助函数
+    ensureStringRuntimeDeclared(ctx);
 
     // 类定义（目前仅占位）
     for (const auto& cls : classes) {
@@ -676,6 +757,67 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
         method->codeGen(ctx);
     }
     currentClassNameCodegen = saved;
+
+    // ===== 生成反射查找表 =====
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    auto i32Ty = llvm::Type::getInt32Ty(ctx.context);
+
+    // 字段名数组
+    {
+        auto layoutIt = classFieldLayouts.find(name->ident);
+        if (layoutIt != classFieldLayouts.end() && !layoutIt->second.empty()) {
+            std::vector<llvm::Constant*> elements;
+            for (const auto& [fname, ftype] : layoutIt->second) {
+                auto* strData = llvm::ConstantDataArray::getString(ctx.context, fname, true);
+                auto* gv = new llvm::GlobalVariable(
+                    ctx.module, strData->getType(), true,
+                    llvm::GlobalValue::PrivateLinkage, strData,
+                    ".reflect_fn_" + name->ident + "_" + fname);
+                auto* lenC = llvm::ConstantInt::get(i32Ty, static_cast<int>(fname.size()));
+                auto* ptrC = llvm::ConstantExpr::getInBoundsGetElementPtr(
+                    strData->getType(), gv,
+                    llvm::ArrayRef<llvm::Constant*>{
+                        llvm::ConstantInt::get(i32Ty, 0),
+                        llvm::ConstantInt::get(i32Ty, 0)});
+                elements.push_back(llvm::ConstantStruct::get(strTy, { lenC, ptrC }));
+            }
+            auto* arrTy = llvm::ArrayType::get(strTy, elements.size());
+            auto* arrConst = llvm::ConstantArray::get(arrTy, elements);
+            new llvm::GlobalVariable(
+                ctx.module, arrTy, true,
+                llvm::GlobalValue::PrivateLinkage, arrConst,
+                "__l25_reflect_fields_" + name->ident);
+        }
+    }
+
+    // 方法名数组
+    {
+        auto mnIt = classMethodNames.find(name->ident);
+        if (mnIt != classMethodNames.end() && !mnIt->second.empty()) {
+            std::vector<llvm::Constant*> elements;
+            for (const auto& mname : mnIt->second) {
+                auto* strData = llvm::ConstantDataArray::getString(ctx.context, mname, true);
+                auto* gv = new llvm::GlobalVariable(
+                    ctx.module, strData->getType(), true,
+                    llvm::GlobalValue::PrivateLinkage, strData,
+                    ".reflect_mn_" + name->ident + "_" + mname);
+                auto* lenC = llvm::ConstantInt::get(i32Ty, static_cast<int>(mname.size()));
+                auto* ptrC = llvm::ConstantExpr::getInBoundsGetElementPtr(
+                    strData->getType(), gv,
+                    llvm::ArrayRef<llvm::Constant*>{
+                        llvm::ConstantInt::get(i32Ty, 0),
+                        llvm::ConstantInt::get(i32Ty, 0)});
+                elements.push_back(llvm::ConstantStruct::get(strTy, { lenC, ptrC }));
+            }
+            auto* arrTy = llvm::ArrayType::get(strTy, elements.size());
+            auto* arrConst = llvm::ConstantArray::get(arrTy, elements);
+            new llvm::GlobalVariable(
+                ctx.module, arrTy, true,
+                llvm::GlobalValue::PrivateLinkage, arrConst,
+                "__l25_reflect_methods_" + name->ident);
+        }
+    }
+
     return nullptr;
 }
 
@@ -875,6 +1017,20 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
 {
     const std::string& ident_name = name->ident;
     auto typeInfo = name->type;
+
+    // 自动推导：如果类型为默认 Int 且 RHS 是字符串字面量，则推导为 String
+    if (typeInfo.kind == SymbolKind::Int && typeInfo.pointerLevel == 0 && expr) {
+        TypeInfo rhsType = evaluateExprType(expr.get());
+        if (rhsType.kind == SymbolKind::String) {
+            typeInfo = TypeInfo{ SymbolKind::String, {}, 0, false };
+            // 更新符号表中的类型
+            SymbolInfo* symbolInfo = scope->lookupLocal(ident_name);
+            if (symbolInfo) {
+                symbolInfo->kind = SymbolKind::String;
+            }
+        }
+    }
+
     llvm::Type* valueType = typeInfoToLLVMValueType(typeInfo, ctx.context);
     llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(valueType, nullptr, ident_name);
 
@@ -884,6 +1040,13 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
                 ? static_cast<llvm::Value*>(llvm::ConstantFP::get(valueType, 0.0))
                 : static_cast<llvm::Value*>(llvm::ConstantInt::get(valueType, 0));
             ctx.builder.CreateStore(zeroInit, alloca);
+        }
+    } else if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
+        // 字符串零初始化：len=0, data=null
+        if (!expr) {
+            llvm::StructType* strTy = getL25StringType(ctx.context);
+            llvm::Value* zero = llvm::ConstantAggregateZero::get(strTy);
+            ctx.builder.CreateStore(zero, alloca);
         }
     } else if (typeInfo.kind == SymbolKind::Array && typeInfo.pointerLevel == 0) {
         // 类型参数列表：i8* 和 i64
@@ -1124,6 +1287,18 @@ llvm::Value* WhileStmt::codeGen(CodeGenContext& ctx) const
 FuncCallStmt::FuncCallStmt(std::unique_ptr<IdentExpr> name, std::unique_ptr<ArgList> args)
     : name(std::move(name)), args(std::move(args)) {}
 
+// 表达式语句节点
+void ExprStmt::print(int indent) const
+{
+    if (expr) expr->print(indent);
+}
+
+llvm::Value* ExprStmt::codeGen(CodeGenContext& ctx) const
+{
+    if (expr) return expr->codeGen(ctx);
+    return nullptr;
+}
+
 void FuncCallStmt::print(int indent) const 
 {
     std::cout << std::string(indent, ' ') << "Call" << std::endl;
@@ -1211,6 +1386,7 @@ llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const
         assert(scope && "InputStmt::codeGen 中的 scope 为空");
         llvm::Value* addr = nullptr;
         bool expectFloat = false;
+        bool expectString = false;
         if (auto* idExpr = dynamic_cast<IdentExpr*>(ident.get())) {
             SymbolInfo* symbol = scope->lookup(idExpr->ident);
             if (!symbol) {
@@ -1219,6 +1395,7 @@ llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const
             }
 
             expectFloat = symbol->isFloat;
+            expectString = (symbol->kind == SymbolKind::String);
 
             if (symbol->kind == SymbolKind::Array) {
                 reportError("不支持直接输入数组: " + idExpr->ident);
@@ -1240,9 +1417,38 @@ llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const
                 reportError("数组下标访问异常");
             }
         }
-        std::string fmt = expectFloat ? "%f" : "%d";
-        llvm::Value* formatStr = ctx.builder.CreateGlobalString(fmt);
-        ctx.builder.CreateCall(scanfFunc, { formatStr, addr });
+
+        if (expectString) {
+            // 字符串输入：分配缓冲区，使用 scanf %1023s 读入，再构建 __l25_string
+            ensureStringRuntimeDeclared(ctx);
+            auto* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+            auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+
+            // malloc(1024) 作为临时缓冲区
+            llvm::Value* bufSize = llvm::ConstantInt::get(i64Ty, 1024);
+            llvm::Value* buf = ctx.builder.CreateCall(
+                ctx.module.getFunction("malloc"), { bufSize }, "input_buf");
+
+            // scanf("%1023s", buf)
+            llvm::Value* fmtStr = ctx.builder.CreateGlobalString("%1023s");
+            ctx.builder.CreateCall(scanfFunc, { fmtStr, buf });
+
+            // len = strlen(buf)
+            llvm::Value* lenI64 = ctx.builder.CreateCall(
+                ctx.module.getFunction("strlen"), { buf }, "input_len64");
+            llvm::Value* lenI32 = ctx.builder.CreateTrunc(lenI64, i32Ty, "input_len");
+
+            // 构建 __l25_string 并存储
+            llvm::StructType* strTy = getL25StringType(ctx.context);
+            llvm::Value* strVal = llvm::UndefValue::get(strTy);
+            strVal = ctx.builder.CreateInsertValue(strVal, lenI32, 0, "str_set_len");
+            strVal = ctx.builder.CreateInsertValue(strVal, buf, 1, "str_set_data");
+            ctx.builder.CreateStore(strVal, addr);
+        } else {
+            std::string fmt = expectFloat ? "%f" : "%d";
+            llvm::Value* formatStr = ctx.builder.CreateGlobalString(fmt);
+            ctx.builder.CreateCall(scanfFunc, { formatStr, addr });
+        }
     }
     return nullptr;
 }
@@ -1293,7 +1499,14 @@ llvm::Value* OutputStmt::codeGen(CodeGenContext& ctx) const {
                 val = ctx.builder.CreateZExt(val, llvm::Type::getInt32Ty(ctx.context));
             }
 
-            if (val->getType()->isFloatingPointTy()) {
+            // 检查是否为字符串类型 (__l25_string struct)
+            llvm::StructType* strTy = getL25StringType(ctx.context);
+            if (val->getType() == strTy) {
+                formatStr += "%s";
+                // 从结构体中提取 data 指针 (index 1)
+                llvm::Value* dataPtr = ctx.builder.CreateExtractValue(val, 1, "str_data");
+                printfArgs.push_back(dataPtr);
+            } else if (val->getType()->isFloatingPointTy()) {
                 formatStr += "%f";
                 llvm::Value* promoted = ctx.builder.CreateFPExt(val, llvm::Type::getDoubleTy(ctx.context), "fpext_print");
                 printfArgs.push_back(promoted);
@@ -1403,6 +1616,34 @@ llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const
 
     llvm::Type* lhsTy = lhsVal->getType();
     llvm::Type* rhsTy = rhsVal->getType();
+
+    // 字符串比较
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    bool lhsIsStr = (lhsTy == strTy);
+    bool rhsIsStr = (rhsTy == strTy);
+    if (lhsIsStr || rhsIsStr) {
+        if (!lhsIsStr || !rhsIsStr) {
+            reportError("字符串只能与字符串比较");
+            return nullptr;
+        }
+        if (symbol != "==" && symbol != "!=") {
+            reportError("字符串仅支持 == 和 != 比较");
+            return nullptr;
+        }
+        ensureStringRuntimeDeclared(ctx);
+        llvm::Value* lhsData = ctx.builder.CreateExtractValue(lhsVal, 1, "lhs_str_data");
+        llvm::Value* rhsData = ctx.builder.CreateExtractValue(rhsVal, 1, "rhs_str_data");
+        llvm::Value* cmpResult = ctx.builder.CreateCall(
+            ctx.module.getFunction("strcmp"), { lhsData, rhsData }, "strcmp_result");
+        if (symbol == "==") {
+            return ctx.builder.CreateICmpEQ(cmpResult,
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0), "str_eq");
+        } else {
+            return ctx.builder.CreateICmpNE(cmpResult,
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0), "str_ne");
+        }
+    }
+
     bool useFloat = lhsTy->isFloatingPointTy() || rhsTy->isFloatingPointTy();
     bool usePointer = lhsTy->isPointerTy() || rhsTy->isPointerTy();
 
@@ -1607,6 +1848,62 @@ llvm::Value* BinaryExpr::codeGen(CodeGenContext& ctx) const
     if (!LHS || !RHS) {
         reportError("二元运算的子表达式生成失败");
         return nullptr;
+    }
+
+    // 字符串拼接
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    bool lhsIsStr = (LHS->getType() == strTy);
+    bool rhsIsStr = (RHS->getType() == strTy);
+    if (lhsIsStr || rhsIsStr) {
+        if (op != '+') {
+            reportError("字符串仅支持 + 运算（拼接）");
+            return nullptr;
+        }
+        if (!lhsIsStr || !rhsIsStr) {
+            reportError("字符串拼接要求两侧均为字符串类型");
+            return nullptr;
+        }
+        ensureStringRuntimeDeclared(ctx);
+        auto* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+        auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+
+        // 提取各自的 len 和 data
+        llvm::Value* lhsLen = ctx.builder.CreateExtractValue(LHS, 0, "lhs_len");
+        llvm::Value* lhsData = ctx.builder.CreateExtractValue(LHS, 1, "lhs_data");
+        llvm::Value* rhsLen = ctx.builder.CreateExtractValue(RHS, 0, "rhs_len");
+        llvm::Value* rhsData = ctx.builder.CreateExtractValue(RHS, 1, "rhs_data");
+
+        // newLen = lhsLen + rhsLen
+        llvm::Value* newLen = ctx.builder.CreateAdd(lhsLen, rhsLen, "new_len");
+        // allocSize = newLen + 1 (for null terminator)
+        llvm::Value* allocSize = ctx.builder.CreateAdd(newLen,
+            llvm::ConstantInt::get(i32Ty, 1), "alloc_size");
+        llvm::Value* allocSize64 = ctx.builder.CreateZExt(allocSize, i64Ty, "alloc_size64");
+
+        // buf = malloc(allocSize)
+        llvm::Value* buf = ctx.builder.CreateCall(
+            ctx.module.getFunction("malloc"), { allocSize64 }, "concat_buf");
+
+        // memcpy(buf, lhsData, lhsLen)
+        llvm::Value* lhsLen64 = ctx.builder.CreateZExt(lhsLen, i64Ty, "lhs_len64");
+        ctx.builder.CreateCall(ctx.module.getFunction("memcpy"),
+            { buf, lhsData, lhsLen64 });
+
+        // memcpy(buf + lhsLen, rhsData, rhsLen)
+        llvm::Value* rhsLen64 = ctx.builder.CreateZExt(rhsLen, i64Ty, "rhs_len64");
+        llvm::Value* bufOffset = ctx.builder.CreateGEP(
+            llvm::Type::getInt8Ty(ctx.context), buf, { lhsLen64 }, "buf_offset");
+        // copy rhsLen + 1 to include null terminator
+        llvm::Value* rhsCopyLen = ctx.builder.CreateAdd(rhsLen64,
+            llvm::ConstantInt::get(i64Ty, 1), "rhs_copy_len");
+        ctx.builder.CreateCall(ctx.module.getFunction("memcpy"),
+            { bufOffset, rhsData, rhsCopyLen });
+
+        // 构建结果 __l25_string
+        llvm::Value* result = llvm::UndefValue::get(strTy);
+        result = ctx.builder.CreateInsertValue(result, newLen, 0, "concat_set_len");
+        result = ctx.builder.CreateInsertValue(result, buf, 1, "concat_set_data");
+        return result;
     }
 
     bool useFloat = LHS->getType()->isFloatingPointTy() || RHS->getType()->isFloatingPointTy();
@@ -2060,6 +2357,9 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
         TypeInfo symbolType{ SymbolKind::Class, symbol->dimensions, symbol->pointerLevel, symbol->isFloat, symbol->className };
         llvm::Type* valueType = typeInfoToLLVMValueType(symbolType, ctx.context);
         return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
+    } else if (symbol->kind == SymbolKind::String) {
+        llvm::Type* strTy = getL25StringType(ctx.context);
+        return ctx.builder.CreateLoad(strTy, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
     }
@@ -2127,18 +2427,6 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    if (funcSymbol->funcDef) {
-        for (auto* captured : funcSymbol->funcDef->captures) {
-            if (!captured) continue;
-            SymbolInfo* callerSymbol = scope->lookup(captured->name);
-            if (!callerSymbol || !callerSymbol->addr) {
-                reportError("捕获变量: " + captured->name + " 在调用点不可用");
-                return nullptr;
-            }
-            argsV.push_back(callerSymbol->addr);
-        }
-    }
-
     return ctx.builder.CreateCall(calleeFunc, argsV, funcName + "_call");
 }
 
@@ -2191,4 +2479,427 @@ void InputArgList::print(int indent) const
 llvm::Value* InputArgList::codeGen(CodeGenContext& ctx) const
 {
     return nullptr;
+}
+
+// ===== 字符串字面量节点 =====
+StringLiteralExpr::StringLiteralExpr(const std::string& val) : value(val) {}
+
+void StringLiteralExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "String(\"" << value << "\")" << std::endl;
+}
+
+llvm::Value* StringLiteralExpr::codeGen(CodeGenContext& ctx) const
+{
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    // 创建全局常量字符串（含 null 终止符）
+    llvm::Constant* strConst = ctx.builder.CreateGlobalString(value, ".str");
+    // 构建 __l25_string { len, data }
+    llvm::Value* result = llvm::UndefValue::get(strTy);
+    llvm::Value* lenVal = llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context),
+                                                  static_cast<int>(value.size()));
+    result = ctx.builder.CreateInsertValue(result, lenVal, 0, "str_set_len");
+    result = ctx.builder.CreateInsertValue(result, strConst, 1, "str_set_data");
+    return result;
+}
+
+// ===== strlen 内建函数节点 =====
+StrlenExpr::StrlenExpr(std::unique_ptr<Expr> target) : target(std::move(target)) {}
+
+void StrlenExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Strlen" << std::endl;
+    if (target) target->print(indent + 2);
+}
+
+llvm::Value* StrlenExpr::codeGen(CodeGenContext& ctx) const
+{
+    llvm::Value* val = target->codeGen(ctx);
+    if (!val) {
+        reportError("strlen 参数表达式生成失败");
+        return nullptr;
+    }
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    if (val->getType() != strTy) {
+        reportError("strlen 仅支持字符串类型参数");
+        return nullptr;
+    }
+    // 直接提取 len 字段（index 0）
+    return ctx.builder.CreateExtractValue(val, 0, "str_len");
+}
+
+// ===== 反射：辅助函数 - 从表达式推导类名 =====
+static std::string resolveClassNameFromExpr(const Expr* expr)
+{
+    TypeInfo ti = evaluateExprType(expr);
+    // 允许类实例（pointerLevel==0）或类指针（pointerLevel>0）
+    if (ti.kind == SymbolKind::Class && !ti.className.empty()) {
+        return ti.className;
+    }
+    return "";
+}
+
+// ===== 反射：辅助函数 - 生成 __l25_string 常量值 =====
+static llvm::Value* buildStringConstant(CodeGenContext& ctx, const std::string& str)
+{
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    llvm::Constant* strConst = ctx.builder.CreateGlobalString(str, ".reflect_str");
+    llvm::Value* result = llvm::UndefValue::get(strTy);
+    llvm::Value* lenVal = llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context),
+                                                  static_cast<int>(str.size()));
+    result = ctx.builder.CreateInsertValue(result, lenVal, 0, "str_set_len");
+    result = ctx.builder.CreateInsertValue(result, strConst, 1, "str_set_data");
+    return result;
+}
+
+// ===== 反射：typename(expr) =====
+TypenameExpr::TypenameExpr(std::unique_ptr<Expr> target) : target(std::move(target)) {}
+
+void TypenameExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Typename" << std::endl;
+    if (target) target->print(indent + 2);
+}
+
+llvm::Value* TypenameExpr::codeGen(CodeGenContext& ctx) const
+{
+    std::string className = resolveClassNameFromExpr(target.get());
+    if (className.empty()) {
+        // 非类类型，返回基础类型名称
+        TypeInfo ti = evaluateExprType(target.get());
+        if (ti.kind == SymbolKind::Int) className = "int";
+        else if (ti.kind == SymbolKind::Float) className = "float";
+        else if (ti.kind == SymbolKind::String) className = "string";
+        else className = "unknown";
+    }
+    // 生成目标表达式（可能有副作用）
+    target->codeGen(ctx);
+    return buildStringConstant(ctx, className);
+}
+
+// ===== 反射：fieldcount(expr) =====
+FieldCountExpr::FieldCountExpr(std::unique_ptr<Expr> target) : target(std::move(target)) {}
+
+void FieldCountExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "FieldCount" << std::endl;
+    if (target) target->print(indent + 2);
+}
+
+llvm::Value* FieldCountExpr::codeGen(CodeGenContext& ctx) const
+{
+    std::string className = resolveClassNameFromExpr(target.get());
+    if (className.empty()) {
+        reportError("fieldcount 仅支持类类型参数");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+    auto it = classFieldLayouts.find(className);
+    int count = (it != classFieldLayouts.end()) ? static_cast<int>(it->second.size()) : 0;
+    target->codeGen(ctx);
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), count);
+}
+
+// ===== 反射：methodcount(expr) =====
+MethodCountExpr::MethodCountExpr(std::unique_ptr<Expr> target) : target(std::move(target)) {}
+
+void MethodCountExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "MethodCount" << std::endl;
+    if (target) target->print(indent + 2);
+}
+
+llvm::Value* MethodCountExpr::codeGen(CodeGenContext& ctx) const
+{
+    std::string className = resolveClassNameFromExpr(target.get());
+    if (className.empty()) {
+        reportError("methodcount 仅支持类类型参数");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+    auto it = classMethodNames.find(className);
+    int count = (it != classMethodNames.end()) ? static_cast<int>(it->second.size()) : 0;
+    target->codeGen(ctx);
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), count);
+}
+
+// ===== 反射：fieldname(expr, index) =====
+FieldNameExpr::FieldNameExpr(std::unique_ptr<Expr> target, std::unique_ptr<Expr> index)
+    : target(std::move(target)), index(std::move(index)) {}
+
+void FieldNameExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "FieldName" << std::endl;
+    if (target) target->print(indent + 2);
+    if (index) index->print(indent + 2);
+}
+
+llvm::Value* FieldNameExpr::codeGen(CodeGenContext& ctx) const
+{
+    std::string className = resolveClassNameFromExpr(target.get());
+    if (className.empty()) {
+        reportError("fieldname 仅支持类类型参数");
+        return buildStringConstant(ctx, "");
+    }
+    auto it = classFieldLayouts.find(className);
+    if (it == classFieldLayouts.end() || it->second.empty()) {
+        reportError("fieldname: 类 " + className + " 无字段");
+        return buildStringConstant(ctx, "");
+    }
+    int fieldCount = static_cast<int>(it->second.size());
+
+    // 编译期常量快速路径
+    if (auto numExpr = dynamic_cast<const NumberExpr*>(index.get())) {
+        int idx = numExpr->value;
+        if (idx < 0 || idx >= fieldCount) {
+            reportError("fieldname 索引越界：" + std::to_string(idx));
+            return buildStringConstant(ctx, "");
+        }
+        target->codeGen(ctx);
+        return buildStringConstant(ctx, it->second[idx].first);
+    }
+
+    // 运行时索引：从全局查找表加载
+    target->codeGen(ctx);
+    llvm::Value* idxVal = index->codeGen(ctx);
+    if (!idxVal) {
+        reportError("fieldname 索引表达式生成失败");
+        return buildStringConstant(ctx, "");
+    }
+    if (idxVal->getType()->isIntegerTy(32)) {
+        idxVal = ctx.builder.CreateSExt(idxVal, llvm::Type::getInt64Ty(ctx.context), "idx_ext");
+    }
+
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    auto* arrTy = llvm::ArrayType::get(strTy, fieldCount);
+    auto* gv = ctx.module.getNamedGlobal("__l25_reflect_fields_" + className);
+    if (!gv) {
+        reportError("fieldname: 反射查找表未生成");
+        return buildStringConstant(ctx, "");
+    }
+    llvm::Value* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), 0);
+    llvm::Value* elemPtr = ctx.builder.CreateInBoundsGEP(arrTy, gv, { zero, idxVal }, "field_name_ptr");
+    return ctx.builder.CreateLoad(strTy, elemPtr, "field_name_val");
+}
+
+// ===== 反射：methodname(expr, index) =====
+MethodNameExpr::MethodNameExpr(std::unique_ptr<Expr> target, std::unique_ptr<Expr> index)
+    : target(std::move(target)), index(std::move(index)) {}
+
+void MethodNameExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "MethodName" << std::endl;
+    if (target) target->print(indent + 2);
+    if (index) index->print(indent + 2);
+}
+
+llvm::Value* MethodNameExpr::codeGen(CodeGenContext& ctx) const
+{
+    std::string className = resolveClassNameFromExpr(target.get());
+    if (className.empty()) {
+        reportError("methodname 仅支持类类型参数");
+        return buildStringConstant(ctx, "");
+    }
+    auto it = classMethodNames.find(className);
+    if (it == classMethodNames.end() || it->second.empty()) {
+        reportError("methodname: 类 " + className + " 无方法");
+        return buildStringConstant(ctx, "");
+    }
+    int methodCount = static_cast<int>(it->second.size());
+
+    // 编译期常量快速路径
+    if (auto numExpr = dynamic_cast<const NumberExpr*>(index.get())) {
+        int idx = numExpr->value;
+        if (idx < 0 || idx >= methodCount) {
+            reportError("methodname 索引越界：" + std::to_string(idx));
+            return buildStringConstant(ctx, "");
+        }
+        target->codeGen(ctx);
+        return buildStringConstant(ctx, it->second[idx]);
+    }
+
+    // 运行时索引：从全局查找表加载
+    target->codeGen(ctx);
+    llvm::Value* idxVal = index->codeGen(ctx);
+    if (!idxVal) {
+        reportError("methodname 索引表达式生成失败");
+        return buildStringConstant(ctx, "");
+    }
+    if (idxVal->getType()->isIntegerTy(32)) {
+        idxVal = ctx.builder.CreateSExt(idxVal, llvm::Type::getInt64Ty(ctx.context), "idx_ext");
+    }
+
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    auto* arrTy = llvm::ArrayType::get(strTy, methodCount);
+    auto* gv = ctx.module.getNamedGlobal("__l25_reflect_methods_" + className);
+    if (!gv) {
+        reportError("methodname: 反射查找表未生成");
+        return buildStringConstant(ctx, "");
+    }
+    llvm::Value* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), 0);
+    llvm::Value* elemPtr = ctx.builder.CreateInBoundsGEP(arrTy, gv, { zero, idxVal }, "method_name_ptr");
+    return ctx.builder.CreateLoad(strTy, elemPtr, "method_name_val");
+}
+
+// ===== 反射：invoke(obj, name_expr [, args...]) =====
+InvokeExpr::InvokeExpr(std::unique_ptr<Expr> target, std::unique_ptr<Expr> methodName, std::unique_ptr<ArgList> args)
+    : target(std::move(target)), methodName(std::move(methodName)), args(std::move(args)) {}
+
+void InvokeExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Invoke" << std::endl;
+    if (target) target->print(indent + 2);
+    if (methodName) methodName->print(indent + 2);
+    if (args) args->print(indent + 2);
+}
+
+llvm::Value* InvokeExpr::codeGen(CodeGenContext& ctx) const
+{
+    // 1. 解析类名
+    std::string className = resolveClassNameFromExpr(target.get());
+    if (className.empty()) {
+        reportError("invoke 仅支持类类型参数");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+
+    // 2. 获取方法名字符串并提取 char*
+    llvm::Value* nameVal = methodName->codeGen(ctx);
+    if (!nameVal) {
+        reportError("invoke 方法名表达式生成失败");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+    llvm::Value* namePtr = ctx.builder.CreateExtractValue(nameVal, 1, "invoke_name_ptr");
+
+    // 3. 获取 this 指针（复用 MethodCallExpr 的逻辑）
+    TypeInfo baseType = evaluateExprType(target.get());
+    llvm::Value* baseValue = nullptr;
+    if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {
+        if (SymbolInfo* symbol = ident->scope->lookup(ident->ident)) {
+            if (symbol->kind == SymbolKind::Class && symbol->pointerLevel == 0) {
+                baseValue = symbol->addr;
+            }
+        }
+    } else if (auto memberAccess = dynamic_cast<MemberAccessExpr*>(target.get())) {
+        baseValue = memberAccess->getPointer(ctx);
+    } else if (auto arrayAccess = dynamic_cast<ArraySubscriptExpr*>(target.get())) {
+        baseValue = arrayAccess->getAddress(ctx);
+    }
+    if (!baseValue) {
+        baseValue = target->codeGen(ctx);
+    }
+
+    llvm::StructType* classTy = classStructTypes[baseType.className];
+    if (!classTy) {
+        reportError("invoke: 无法找到类类型");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+    llvm::Value* thisPtr = baseValue;
+    if (!thisPtr->getType()->isPointerTy()) {
+        auto* tmp = ctx.builder.CreateAlloca(thisPtr->getType());
+        ctx.builder.CreateStore(thisPtr, tmp);
+        thisPtr = tmp;
+    }
+    llvm::PointerType* targetPtrTy = llvm::PointerType::get(classTy, 0);
+    if (thisPtr->getType() != targetPtrTy) {
+        thisPtr = ctx.builder.CreateBitCast(thisPtr, targetPtrTy);
+    }
+
+    // 4. 预先生成额外参数
+    std::vector<llvm::Value*> extraArgs;
+    if (args) {
+        for (const auto& arg : args->args) {
+            extraArgs.push_back(arg->codeGen(ctx));
+        }
+    }
+    size_t extraArgCount = extraArgs.size();
+
+    // 5. 确保 strcmp 存在
+    ensureStringRuntimeDeclared(ctx);
+    llvm::Function* strcmpFn = ctx.module.getFunction("strcmp");
+
+    // 6. 收集匹配 arity 的方法
+    auto mnIt = classMethodNames.find(className);
+    if (mnIt == classMethodNames.end() || mnIt->second.empty()) {
+        reportError("invoke: 类 " + className + " 无方法");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+
+    struct MethodCandidate {
+        std::string name;
+        llvm::Function* func;
+    };
+    std::vector<MethodCandidate> candidates;
+    for (const auto& mname : mnIt->second) {
+        std::string funcName = className + "." + mname;
+        llvm::Function* fn = ctx.module.getFunction(funcName);
+        if (!fn) continue;
+        size_t paramCount = fn->arg_size() - 1; // 减去 this
+        if (paramCount == extraArgCount) {
+            candidates.push_back({mname, fn});
+        }
+    }
+
+    if (candidates.empty()) {
+        reportError("invoke: 未找到参数数量为 " + std::to_string(extraArgCount) + " 的方法");
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+    }
+
+    // 7. 创建 result 变量
+    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+    llvm::AllocaInst* resultAlloca = ctx.builder.CreateAlloca(i32Ty, nullptr, "invoke_result");
+    ctx.builder.CreateStore(llvm::ConstantInt::get(i32Ty, 0), resultAlloca);
+
+    // 8. 生成 if-else strcmp 分发链
+    llvm::Function* currentFunc = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* endBB = llvm::BasicBlock::Create(ctx.context, "invoke_end", currentFunc);
+
+    for (size_t ci = 0; ci < candidates.size(); ++ci) {
+        auto& cand = candidates[ci];
+
+        llvm::Constant* nameStr = ctx.builder.CreateGlobalString(cand.name, ".invoke_cmp_" + cand.name);
+        llvm::Value* cmpResult = ctx.builder.CreateCall(strcmpFn, {namePtr, nameStr}, "strcmp_res");
+        llvm::Value* isMatch = ctx.builder.CreateICmpEQ(cmpResult, llvm::ConstantInt::get(i32Ty, 0), "is_match");
+
+        llvm::BasicBlock* callBB = llvm::BasicBlock::Create(ctx.context, "invoke_call_" + cand.name, currentFunc);
+        llvm::BasicBlock* nextBB = (ci + 1 < candidates.size())
+            ? llvm::BasicBlock::Create(ctx.context, "invoke_next", currentFunc)
+            : endBB;
+
+        ctx.builder.CreateCondBr(isMatch, callBB, nextBB);
+
+        // 生成调用块
+        ctx.builder.SetInsertPoint(callBB);
+        std::vector<llvm::Value*> callArgs;
+        callArgs.push_back(thisPtr);
+
+        // 参数类型转换
+        auto fnArgIt = cand.func->arg_begin();
+        ++fnArgIt; // 跳过 this
+        for (size_t ai = 0; ai < extraArgCount; ++ai, ++fnArgIt) {
+            llvm::Value* argVal = extraArgs[ai];
+            llvm::Type* expectedTy = fnArgIt->getType();
+            argVal = castValueToType(argVal, expectedTy, ctx);
+            callArgs.push_back(argVal);
+        }
+
+        llvm::Value* callResult = ctx.builder.CreateCall(cand.func, callArgs, "invoke_ret");
+
+        // 将结果转为 i32
+        llvm::Value* i32Result;
+        if (callResult->getType()->isIntegerTy(32)) {
+            i32Result = callResult;
+        } else if (callResult->getType()->isFloatTy() || callResult->getType()->isDoubleTy()) {
+            i32Result = ctx.builder.CreateFPToSI(callResult, i32Ty, "fp_to_i32");
+        } else {
+            i32Result = llvm::ConstantInt::get(i32Ty, 0);
+        }
+
+        ctx.builder.CreateStore(i32Result, resultAlloca);
+        ctx.builder.CreateBr(endBB);
+
+        if (nextBB != endBB) {
+            ctx.builder.SetInsertPoint(nextBB);
+        }
+    }
+
+    ctx.builder.SetInsertPoint(endBB);
+    return ctx.builder.CreateLoad(i32Ty, resultAlloca, "invoke_result_val");
 }

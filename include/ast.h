@@ -36,6 +36,14 @@ struct UnaryExpr;
 struct BinaryExpr;
 struct IdentExpr;
 struct FuncCallExpr;
+struct StringLiteralExpr;
+struct StrlenExpr;
+struct TypenameExpr;
+struct FieldCountExpr;
+struct MethodCountExpr;
+struct FieldNameExpr;
+struct MethodNameExpr;
+struct InvokeExpr;
 struct ArgList;
 struct ParamList;
 struct InputArgList;
@@ -61,6 +69,7 @@ struct CodeGenContext
 extern std::unordered_map<std::string, llvm::StructType*> classStructTypes;
 extern std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
 extern std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
+extern std::unordered_map<std::string, std::vector<std::string>> classMethodNames;
 TypeInfo evaluateExprType(const Expr* expr);
 
 // AST节点基类
@@ -277,6 +286,15 @@ struct FuncCallStmt: public Stmt
 
     void print(int indent = 0) const override;
 
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 表达式语句（将任意 Expr 包装为 Stmt，用于 invoke 等可以作为独立语句使用的表达式）
+struct ExprStmt: public Stmt
+{
+    std::unique_ptr<Expr> expr;
+    explicit ExprStmt(std::unique_ptr<Expr> expr) : expr(std::move(expr)) {}
+    void print(int indent = 0) const override;
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
@@ -534,3 +552,84 @@ struct InputArgList: public ASTNode
 };
 
 extern Program* rootProgram;
+
+// 字符串字面量节点
+struct StringLiteralExpr: public Expr
+{
+    std::string value;
+    explicit StringLiteralExpr(const std::string& val);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// strlen 内建函数节点
+struct StrlenExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    explicit StrlenExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// ===== 反射内建函数节点 =====
+
+// typename(expr) -> 返回类名字符串
+struct TypenameExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    explicit TypenameExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// fieldcount(expr) -> 返回字段数量
+struct FieldCountExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    explicit FieldCountExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// methodcount(expr) -> 返回方法数量
+struct MethodCountExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    explicit MethodCountExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// fieldname(expr, index) -> 返回第 index 个字段的名称
+struct FieldNameExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<Expr> index;
+    FieldNameExpr(std::unique_ptr<Expr> target, std::unique_ptr<Expr> index);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// methodname(expr, index) -> 返回第 index 个方法的名称
+struct MethodNameExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<Expr> index;
+    MethodNameExpr(std::unique_ptr<Expr> target, std::unique_ptr<Expr> index);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// invoke(obj, name_expr [, args...]) -> 运行时按名称调用方法
+struct InvokeExpr: public Expr
+{
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<Expr> methodName;
+    std::unique_ptr<ArgList> args;  // nullable
+    InvokeExpr(std::unique_ptr<Expr> target, std::unique_ptr<Expr> methodName, std::unique_ptr<ArgList> args);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 获取或创建 L25 字符串结构体类型 %__l25_string = type { i32, i8* }
+llvm::StructType* getL25StringType(llvm::LLVMContext& ctx);

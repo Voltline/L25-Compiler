@@ -1,0 +1,42 @@
+program reflection_test {
+    class Point {
+        let x: int;
+        let y: int;
+
+        Point(a, b) {
+            this.x = a;
+            this.y = b;
+        }
+
+        ~Point() {}
+
+        func getX() {
+            return this.x;
+        }
+
+        func getY() {
+            return this.y;
+        }
+
+        func setX(v) {
+            this.x = v;
+            return 0;
+        }
+    }
+
+    main {
+        let p: *Point;
+        p = new Point(3, 4);
+
+        output(typename(p));
+        output(fieldcount(p));
+        output(methodcount(p));
+        output(fieldname(p, 0));
+        output(fieldname(p, 1));
+        output(methodname(p, 0));
+        output(methodname(p, 1));
+        output(methodname(p, 2));
+
+        delete p;
+    }
+}

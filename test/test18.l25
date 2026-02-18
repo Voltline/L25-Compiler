@@ -1,91 +1,91 @@
 program linked_list {
-class Node {
-    let value: int;
-    let next: *Node;
+    class Node {
+        let value: int;
+        let next: *Node;
 
-    Node(v) {
-        this.value = v;
-        this.next = nil;
+        Node(v) {
+            this.value = v;
+            this.next = nil;
+        }
+
+        ~Node() {
+        }
     }
 
-    ~Node() {
-    }
-}
+    class List {
+        let head: *Node;
 
-class List {
-    let head: *Node;
+        List() {
+            this.head = nil;
+        }
 
-    List() {
-        this.head = nil;
-    }
-
-    ~List() {
-        let cur: *Node;
-        cur = this.head;
-        while (cur != nil) {
-            let nextNode: *Node;
-            nextNode = cur.next;
-            cur.next = nil;
-            delete cur;
-            cur = nextNode;
-        };
-    }
-
-    func push_front(v) {
-        let n: *Node;
-        n = new Node(v);
-        n.next = this.head;
-        this.head = n;
-    }
-
-    func push_back(v) {
-        let n: *Node;
-        n = new Node(v);
-        if (this.head == nil) {
-            this.head = n;
-        } else {
+        ~List() {
             let cur: *Node;
             cur = this.head;
-            while (cur.next != nil) {
+            while (cur != nil) {
+                let nextNode: *Node;
+                nextNode = cur.next;
+                cur.next = nil;
+                delete cur;
+                cur = nextNode;
+            };
+        }
+
+        func push_front(v) {
+            let n: *Node;
+            n = new Node(v);
+            n.next = this.head;
+            this.head = n;
+        }
+
+        func push_back(v) {
+            let n: *Node;
+            n = new Node(v);
+            if (this.head == nil) {
+                this.head = n;
+            } else {
+                let cur: *Node;
+                cur = this.head;
+                while (cur.next != nil) {
+                    cur = cur.next;
+                };
+                cur.next = n;
+            };
+        }
+
+        func sum() {
+            let cur: *Node;
+            cur = this.head;
+            let acc = 0;
+            while (cur != nil) {
+                acc = acc + cur.value;
                 cur = cur.next;
             };
-            cur.next = n;
-        };
+            return acc;
+        }
+
+        func output_all() {
+            let cur: *Node;
+            cur = this.head;
+            while (cur != nil) {
+                output(cur.value);
+                cur = cur.next;
+            };
+        }
     }
 
-    func sum() {
-        let cur: *Node;
-        cur = this.head;
-        let acc = 0;
-        while (cur != nil) {
-            acc = acc + cur.value;
-            cur = cur.next;
-        };
-        return acc;
+    main {
+        let list: *List;
+        list = new List();
+        let tmp;
+
+        tmp = list.push_back(1);
+        tmp = list.push_back(2);
+        tmp = list.push_front(0);
+        tmp = list.push_back(3);
+        tmp = list.output_all();
+        output(list.sum());
+
+        delete list;
     }
-
-    func output_all() {
-        let cur: *Node;
-        cur = this.head;
-        while (cur != nil) {
-            output(cur.value);
-            cur = cur.next;
-        };
-    }
-}
-
-main {
-    let list: *List;
-    list = new List();
-    let tmp;
-
-    tmp = list.push_back(1);
-    tmp = list.push_back(2);
-    tmp = list.push_front(0);
-    tmp = list.push_back(3);
-    tmp = list.output_all();
-    output(list.sum());
-
-    delete list;
-}
 }

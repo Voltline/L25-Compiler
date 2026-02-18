@@ -20,6 +20,9 @@ SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type)
     if (kind == SymbolKind::Array) {
         dimensions = type.dims; // 保存维度信息
     }
+    if (kind == SymbolKind::String) {
+        // String 类型，无额外字段需要设置
+    }
 }
 
 SymbolInfo::SymbolInfo(const std::string& name, const Func& func)

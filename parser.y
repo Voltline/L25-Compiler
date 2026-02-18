@@ -43,6 +43,7 @@ extern Program* rootProgram;
     int num;
     double fnum;
     std::string* ident;
+    std::string* strval;
     Expr* expr;
     ParamList* paramList; // 函数定义
     Stmt* stmt;
@@ -114,9 +115,11 @@ extern Program* rootProgram;
 
 %token <num> NUMBER
 %token <fnum> FLOATNUMBER
+%token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN CLASS EXTENDS THIS NEW DELETE
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE
+%token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
@@ -430,6 +433,24 @@ stmt:
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }
+    | INVOKE LPAREN expr COMMA expr RPAREN
+    {
+        auto* invokeExpr = new InvokeExpr(std::unique_ptr<Expr>($3), std::unique_ptr<Expr>($5), nullptr);
+        invokeExpr->lineno = @1.first_line;
+        invokeExpr->column = @1.first_column;
+        $$ = new ExprStmt(std::unique_ptr<Expr>(invokeExpr));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | INVOKE LPAREN expr COMMA expr COMMA arg_list RPAREN
+    {
+        auto* invokeExpr = new InvokeExpr(std::unique_ptr<Expr>($3), std::unique_ptr<Expr>($5), std::unique_ptr<ArgList>($7));
+        invokeExpr->lineno = @1.first_line;
+        invokeExpr->column = @1.first_column;
+        $$ = new ExprStmt(std::unique_ptr<Expr>(invokeExpr));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     ;
 
 stmt_list:
@@ -740,6 +761,13 @@ factor:
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }
+    | STRING_LITERAL
+    {
+        $$ = new StringLiteralExpr(*$1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $1;
+    }
     | IDENT
     {
         $$ = new IdentExpr(*$1);
@@ -809,6 +837,54 @@ factor:
         $$->lineno = @2.first_line;
         $$->column = @2.first_column;
         delete $3;
+    }
+    | STRLEN LPAREN expr RPAREN
+    {
+        $$ = new StrlenExpr(std::unique_ptr<Expr>($3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | TYPENAME_KW LPAREN expr RPAREN
+    {
+        $$ = new TypenameExpr(std::unique_ptr<Expr>($3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | FIELDCOUNT LPAREN expr RPAREN
+    {
+        $$ = new FieldCountExpr(std::unique_ptr<Expr>($3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | METHODCOUNT LPAREN expr RPAREN
+    {
+        $$ = new MethodCountExpr(std::unique_ptr<Expr>($3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | FIELDNAME LPAREN expr COMMA expr RPAREN
+    {
+        $$ = new FieldNameExpr(std::unique_ptr<Expr>($3), std::unique_ptr<Expr>($5));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | METHODNAME LPAREN expr COMMA expr RPAREN
+    {
+        $$ = new MethodNameExpr(std::unique_ptr<Expr>($3), std::unique_ptr<Expr>($5));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | INVOKE LPAREN expr COMMA expr RPAREN
+    {
+        $$ = new InvokeExpr(std::unique_ptr<Expr>($3), std::unique_ptr<Expr>($5), nullptr);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | INVOKE LPAREN expr COMMA expr COMMA arg_list RPAREN
+    {
+        $$ = new InvokeExpr(std::unique_ptr<Expr>($3), std::unique_ptr<Expr>($5), std::unique_ptr<ArgList>($7));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     ;
 
@@ -905,6 +981,10 @@ base_type:
     | FLOATSIGN
     {
         $$ = new TypeInfo{ SymbolKind::Float, {}, 0, true };
+    }
+    | STRINGSIGN
+    {
+        $$ = new TypeInfo{ SymbolKind::String, {}, 0, false };
     }
     | IDENT
     {

@@ -49,7 +49,7 @@ if (p == nil) {
     output(0);
 };
 ```
-&emsp; Literal `0` remains usable as a null pointer, but the compiler will emit a warning recommending `nil` when it is assigned to pointer-typed slots.
+&emsp; Literal `0` remains usable as a null pointer, but the compiler will emit a warning recommending `nil` when it is assigned to pointer-typed slots. `null` is also accepted as a synonym for `nil`.
 
 * 🧮 *Definition and Invocation of Multidimensional Arrays*:
 ```L25
@@ -116,8 +116,8 @@ program float_ops {
         vec[0] = x;
         vec[1] = y * 2.0;
 
-        output x, y, vec[0], vec[1];
-        output sum(y, 0.5), y - 0.5, 3 / 2; // mixed int/float operations
+        output(x, y, vec[0], vec[1]);
+        output(sum(y, 0.5), y - 0.5, 3 / 2); // mixed int/float operations
     }
 }
 ```
@@ -140,6 +140,74 @@ program class_method {
     }
 }
 ```
+
+* 📝 *String literals, concatenation and built-in `strlen`*:
+```L25
+program string_demo {
+    main {
+        let hello = "Hello";
+        let world = "World";
+        let msg = hello + " " + world + "!";
+        output(msg);           // Hello World!
+        output(strlen(msg));   // 12
+
+        let a: string = "abc";
+        let b: string = "abc";
+        if (a == b) {
+            output(1);         // 1
+        };
+    }
+}
+```
+&emsp; Strings are represented as `{ i32 len, i8* data }` structs.  Type can be inferred from a string literal or declared explicitly with `string`. Supported operations: concatenation (`+`), comparison (`==`, `!=`), `output`, `input`, and `strlen`.
+
+* 🔍 *Compile-time Reflection for Classes*:
+```L25
+program reflect {
+    class Vec2 {
+        let x: int;
+        let y: int;
+        func length() { return this.x + this.y; }
+        func reset()  { this.x = 0; this.y = 0; return 0; }
+    }
+
+    main {
+        let v: Vec2;
+        output(typename(v));        // Vec2
+        output(fieldcount(v));      // 2
+        output(methodcount(v));     // 2
+        output(fieldname(v, 0));    // x
+        output(fieldname(v, 1));    // y
+        output(methodname(v, 0));   // length
+        output(methodname(v, 1));   // reset
+    }
+}
+```
+&emsp; Five built-in reflection functions are available: `typename(expr)` returns the type name as a string, `fieldcount(expr)` and `methodcount(expr)` return the number of fields and methods, `fieldname(expr, n)` and `methodname(expr, n)` return the name of the n-th field or method. The index argument can be a runtime expression (e.g., a loop variable) or a compile-time literal.
+
+&emsp; Additionally, `invoke(obj, name_expr [, args...])` enables **runtime method dispatch**&mdash;calling a method by its string name:
+```L25
+program dynamic_call {
+    class Calc {
+        let val: int;
+        func add(x) { this.val = this.val + x; return this.val; }
+        func get() { return this.val; }
+    }
+
+    main {
+        let c: Calc;
+        output(invoke(c, "add", 5));   // 5
+        // Loop over all 0-arg methods and call them dynamically:
+        let i = 0;
+        while (i < methodcount(c)) {
+            let name = methodname(c, i);
+            output(name);
+            i = i + 1;
+        };
+    }
+}
+```
+&emsp; `invoke` returns `int` (method return values of other types are cast to `int`). It matches candidate methods by argument count and dispatches via `strcmp` at runtime.
 
 * 🧾 *Procedures without explicit return values*:
 ```L25
@@ -271,9 +339,12 @@ program linked_list {
 
     main {
         let list: *List;
+        let tmp: int;
         list = new List();
-        list.push_back(1); list.push_back(2); list.push_back(3);
-        list.print();
+        tmp = list.push_back(1);
+        tmp = list.push_back(2);
+        tmp = list.push_back(3);
+        tmp = list.print();
         delete list; // iteratively releases every node
     }
 }
@@ -301,12 +372,13 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 ```
 <program> =
     "program" <ident> "{"
-        { <class_def> | <func_def> }
+        { <class_def> }
+        { <func_def> }
         "main" "{" <stmt_list> "}"
     "}"
 
 <class_def> =
-    "class" <ident> "{"
+    "class" <ident> [ "extends" <ident> ] "{"
         { <class_member> }
     "}"
 
@@ -314,6 +386,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
       <field_decl>
     | <method_def>
     | <ctor_def>
+    | <dtor_def>
 
 <field_decl> =
     "let" <ident> ":" <type_info> ";"
@@ -326,6 +399,11 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 
 <ctor_def> =
     <ident> "(" [ <param_list> ] ")" "{"
+        <stmt_list>
+    "}"
+
+<dtor_def> =
+    "~" <ident> "(" ")" "{"
         <stmt_list>
     "}"
 
@@ -352,8 +430,15 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <input_stmt>
     | <output_stmt>
     | <func_call>
-    | <method_call>
+    | <delete_stmt>
+    | <invoke_stmt>
     | <nested_func_stmt>
+
+<delete_stmt> =
+    "delete" <expr>
+
+<invoke_stmt> =
+    "invoke" "(" <expr> "," <expr> [ "," <arg_list> ] ")"
 
 <declare_stmt> =
       "let" <ident>
@@ -404,8 +489,8 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     <expr> { "," <expr> }
 
 <input_arg_list> =
-    ( <ident> | <array_subscript_expr> | <member_access> )
-    { "," ( <ident> | <array_subscript_expr> | <member_access> ) }
+    ( <ident> | <array_subscript_expr> )
+    { "," ( <ident> | <array_subscript_expr> ) }
 
 <bool_expr> =
     <expr> ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) <expr>
@@ -420,14 +505,30 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
       <ident>
     | <number>
     | <float_number>
+    | <string_literal>
     | "this"
+    | "nil"
     | "(" <expr> ")"
     | <func_call>
     | <method_call>
     | <member_access>
     | <array_subscript_expr>
+    | "new" <ident> "(" [ <arg_list> ] ")"
+    | "strlen" "(" <expr> ")"
+    | "typename" "(" <expr> ")"
+    | "fieldcount" "(" <expr> ")"
+    | "methodcount" "(" <expr> ")"
+    | "fieldname" "(" <expr> "," <expr> ")"
+    | "methodname" "(" <expr> "," <expr> ")"
+    | "invoke" "(" <expr> "," <expr> [ "," <arg_list> ] ")"
     | "&" <factor>
     | "*" <factor>
+
+<string_literal> =
+    '"' { <any_char> | <escape_seq> } '"'
+
+<escape_seq> =
+    "\\" ( "n" | "t" | "r" | "\\" | '"' | "0" )
 
 <array_subscript_expr> =
     <ident> "[" <array_subscript_list> "]"
@@ -439,10 +540,9 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
       <base_type>
     | "[" <dim_list> "]" [ <base_type> ]
     | "*" <type_info>
-    | <ident>
 
 <base_type> =
-    "int" | "float"
+    "int" | "float" | "string" | <ident>
 
 <dim_list> =
     <number> { "," <number> }
@@ -457,7 +557,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     <digit> { <digit> } "." <digit> { <digit> }
 
 <letter> =
-    "a" | "b" | ... | "z" | "A" | "B" | ... | "Z"
+    "a" | "b" | ... | "z" | "A" | "B" | ... | "Z" | "_"
 
 <digit> =
     "0" | "1" | ... | "9"
@@ -472,7 +572,8 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - `this` can only be used inside class methods.
 - Class methods do **not** support overloading.
 - All class fields must be declared explicitly using `let`.
-- No inheritance or access modifiers (`public` / `private`) are supported.
+- The `extends` keyword is parsed but inheritance semantics (field/method resolution from base class) are **not yet implemented**.
+- No access modifiers (`public` / `private`) are supported.
 - Classes are passed by reference-like semantics when used as variables.
 - Member access and method calls are left-associative:
   `a.b.c()` is parsed as `(a.b).c()`.
@@ -515,7 +616,7 @@ make
 ### 🤖 Smart Input File Detection
 
 You don't have to specify the source file as the first argument.  
-The compiler will **automatically detect the first valid `.l25` file** among the inputs:
+The compiler will **automatically detect the first valid source file** among the inputs:
 
 ```bash
 ./l25cc -emit-ir test/test1.l25 -o out.ll
@@ -535,7 +636,6 @@ L25-Compiler/
 ├── LICENSE
 ├── Makefile
 ├── README.md
-├── a.out
 ├── ast.cpp
 ├── errorReporter.cpp
 ├── include
@@ -583,7 +683,11 @@ L25-Compiler/
 │   ├── test_class_method_call.l25
 │   ├── test_closure.l25
 │   ├── test_float.l25
-│   └── test_pointer.l25
+│   ├── test_invoke.l25
+│   ├── test_pointer.l25
+│   ├── test_reflection.l25
+│   ├── test_runtime_reflect.l25
+│   └── test_string.l25
 └── test.sh
 ```
 

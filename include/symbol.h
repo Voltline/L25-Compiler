@@ -13,6 +13,7 @@
 enum class SymbolKind {
     Int,
     Float,
+    String,
     Array,
     Pointer,
     Class,
@@ -22,7 +23,7 @@ enum class SymbolKind {
 };
 
 const char* const SymbolName[] {
-    "Int", "Float", "Array", "Pointer", "Class", "Function", "Program", "Invalid"
+    "Int", "Float", "String", "Array", "Pointer", "Class", "Function", "Program", "Invalid"
 };
 
 struct TypeInfo
