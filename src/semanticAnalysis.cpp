@@ -360,6 +360,11 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         if (exprStmt->expr) {
             analyzeExpr(*exprStmt->expr);
         }
+    } else if (auto deleteStmt = dynamic_cast<DeleteStmt*>(&stmt)) {
+        deleteStmt->scope = currentScope;
+        if (deleteStmt->target) {
+            analyzeExpr(*deleteStmt->target);
+        }
     }
 }
 

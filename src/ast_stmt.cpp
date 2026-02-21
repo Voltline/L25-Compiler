@@ -126,11 +126,14 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
     if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::String);
     } else if (typeInfo.kind == SymbolKind::Class && typeInfo.pointerLevel > 0) {
-        // 仅当初始值来自 new 时注册清理（避免非拥有指针双重释放）
-        if (expr && dynamic_cast<NewExpr*>(expr.get())) {
-            ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
-            symbolInfo->hasCleanup = true;
-        }
+        // GC 模式：始终注册根（无论是否来自 new）
+        ensureGCRuntimeDeclared(ctx);
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+        llvm::Value* rootAddr = ctx.builder.CreateBitCast(alloca, i8PtrPtrTy, "gc.root.addr");
+        ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_add_root"), {rootAddr});
+        ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
+        symbolInfo->hasCleanup = true;
     } else if (typeInfo.kind == SymbolKind::Vector && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::Vector);
         symbolInfo->hasCleanup = true;
@@ -229,38 +232,16 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
     }
 
     // 类指针赋值
-    bool isLocalVarLHS = dynamic_cast<IdentExpr*>(name.get()) != nullptr;
-    bool isMemberLHS = dynamic_cast<MemberAccessExpr*>(name.get()) != nullptr;
-
     if (lhsType.kind == SymbolKind::Class && lhsType.pointerLevel > 0 && lhsAddr && !lhsType.className.empty()) {
-        if (isLocalVarLHS && targetSymbol) {
-            if (targetSymbol->hasCleanup) {
-                // 已注册清理的变量被覆盖时释放旧值
-                emitClassPtrFree(lhsAddr, lhsType.className, ctx);
-            }
-            // let b; b = new Box(); 模式：首次获得所有权时注册清理
-            if (!targetSymbol->hasCleanup && dynamic_cast<NewExpr*>(expr.get())) {
-                ctx.registerCleanup(lhsAddr, CleanupKind::ClassPtr, lhsType.className);
-                targetSymbol->hasCleanup = true;
-            }
-        }
+        // GC 模式：无需释放旧值，GC 负责回收不可达对象
+        // 也无需移动语义——多个变量可安全指向同一对象
     }
 
     llvm::Type* targetType = typeInfoToLLVMValueType(lhsType, ctx.context);
     llvm::Value* storedValue = castValueToType(rhs, targetType, ctx);
     ctx.builder.CreateStore(storedValue, lhsAddr);
 
-    // 自动移动语义：类指针存储到成员字段时，置空源变量以转移所有权
-    if (isMemberLHS && lhsType.kind == SymbolKind::Class && lhsType.pointerLevel > 0) {
-        if (auto* rhsIdent = dynamic_cast<IdentExpr*>(expr.get())) {
-            SymbolInfo* rhsSym = scope->lookup(rhsIdent->ident);
-            if (rhsSym && rhsSym->addr && storedValue->getType()->isPointerTy()) {
-                ctx.builder.CreateStore(
-                    llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(storedValue->getType())),
-                    rhsSym->addr);
-            }
-        }
-    }
+    // GC 模式下无需自动移动语义，多个引用可安全共存
 
     return rhs;
 }
@@ -620,20 +601,24 @@ llvm::Value* DeleteStmt::codeGen(CodeGenContext& ctx) const
     ctx.builder.CreateCondBr(isNull, contBB, deleteBB);
 
     ctx.builder.SetInsertPoint(deleteBB);
-    std::string dtorName = buildDtorName(type.className);
-    if (llvm::Function* dtorFunc = ctx.module.getFunction(dtorName)) {
-        ctx.builder.CreateCall(dtorFunc, { typedPtr });
-    }
-
+    // GC 模式：使用 l25_gc_free 确定性释放（调用析构 + 从 GC 链表移除 + free）
+    ensureGCRuntimeDeclared(ctx);
     llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
-    llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction(
-        "free",
-        llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), { i8PtrTy }, false)
-    );
     llvm::Value* castPtr = ctx.builder.CreateBitCast(typedPtr, i8PtrTy);
-    ctx.builder.CreateCall(freeFn, { castPtr });
+    llvm::FunctionCallee gcFreeFn = ctx.module.getFunction("l25_gc_free");
+    ctx.builder.CreateCall(gcFreeFn, { castPtr });
     ctx.builder.CreateBr(contBB);
 
     ctx.builder.SetInsertPoint(contBB);
+
+    // 将源变量置空（避免悬挂指针）
+    if (auto identExpr = dynamic_cast<IdentExpr*>(target.get())) {
+        SymbolInfo* sym = scope->lookup(identExpr->ident);
+        if (sym && sym->addr) {
+            ctx.builder.CreateStore(
+                llvm::ConstantPointerNull::get(classPtrTy), sym->addr);
+        }
+    }
+
     return nullptr;
 }

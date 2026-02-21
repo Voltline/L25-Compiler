@@ -1,0 +1,43 @@
+program TestGC {
+    class Node {
+        let value: int;
+        let next: *Node;
+
+        Node(v: int) {
+            this.value = v;
+        }
+    }
+
+    main {
+        // 测试 1: 基本 GC 分配和自动回收
+        let a: *Node = new Node(10);
+        output(a.value);
+
+        // 测试 2: 循环引用 — 没有 GC 就会泄漏
+        let n1: *Node = new Node(1);
+        let n2: *Node = new Node(2);
+        let n3: *Node = new Node(3);
+        n1.next = n2;
+        n2.next = n3;
+        n3.next = n1;
+        output(n1.value);
+        output(n1.next.value);
+        output(n1.next.next.value);
+
+        // 打断循环后让 GC 回收
+        n1.next = nil;
+        n2.next = nil;
+        n3.next = nil;
+
+        // 测试 3: 多个变量指向同一对象 (GC 安全共享)
+        let x: *Node = new Node(42);
+        let y: *Node = x;
+        output(x.value);
+        output(y.value);
+
+        // 测试 4: delete 仍然可用 (确定性释放)
+        let d: *Node = new Node(99);
+        output(d.value);
+        delete d;
+    }
+}

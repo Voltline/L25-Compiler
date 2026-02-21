@@ -68,6 +68,9 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
     // 声明字符串运行时辅助函数
     ensureStringRuntimeDeclared(ctx);
 
+    // 声明 GC 运行时函数
+    ensureGCRuntimeDeclared(ctx);
+
     // 类定义（目前仅占位）
     for (const auto& cls : classes) {
         cls->codeGen(ctx);
@@ -86,10 +89,16 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
     llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", mainFunc);
     ctx.builder.SetInsertPoint(entry);
 
+    // GC 初始化
+    ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_init"), {});
+
     // 生成main_body的IR
     ctx.pushCleanupScope();
     main_body->codeGen(ctx);
     emitScopeCleanup(ctx);
+
+    // GC 关闭（运行最终回收）
+    ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_shutdown"), {});
 
     // 添加默认返回
     ctx.builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));

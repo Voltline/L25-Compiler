@@ -149,10 +149,23 @@ llvm::Value* DtorDecl::codeGen(CodeGenContext& ctx) const
             ctx.builder.CreateStore(&*argIt, alloca);
             thisInfo->addr = alloca;
             thisInfo->value = &*argIt;
+            // GC: 注册 this 为根
+            ensureGCRuntimeDeclared(ctx);
+            auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+            auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+            llvm::Value* rootAddr = ctx.builder.CreateBitCast(alloca, i8PtrPtrTy, "this.root");
+            ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_add_root"), {rootAddr});
         }
     }
 
     ctx.pushCleanupScope();
+    // GC: 注册 this 的清理
+    {
+        SymbolInfo* thisInfo = bodyScope ? bodyScope->lookupLocal("this") : nullptr;
+        if (thisInfo && thisInfo->addr) {
+            ctx.registerCleanup(thisInfo->addr, CleanupKind::GCRoot);
+        }
+    }
     if (body) {
         for (const auto& stmt : body->stmts) {
             stmt->codeGen(ctx);
@@ -223,6 +236,12 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
                 ctx.builder.CreateStore(&arg, alloca);
                 thisInfo->addr = alloca;
                 thisInfo->value = &arg;
+                // GC: 注册 this 为根
+                ensureGCRuntimeDeclared(ctx);
+                auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+                auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+                llvm::Value* rootAddr = ctx.builder.CreateBitCast(alloca, i8PtrPtrTy, "this.root");
+                ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_add_root"), {rootAddr});
             }
         } else {
             arg.setName(params->params[idx - 1]->ident);
@@ -232,12 +251,28 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
                 ctx.builder.CreateStore(&arg, alloca);
                 argInfo->addr = alloca;
                 argInfo->value = &arg;
+                // GC: 类指针参数也注册为根
+                if (arg.getType()->isPointerTy() && params->params[idx - 1]->type.kind == SymbolKind::Class) {
+                    ensureGCRuntimeDeclared(ctx);
+                    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+                    auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+                    llvm::Value* rootAddr = ctx.builder.CreateBitCast(alloca, i8PtrPtrTy, arg.getName() + ".root");
+                    ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_add_root"), {rootAddr});
+                    ctx.registerCleanup(alloca, CleanupKind::GCRoot);
+                }
             }
         }
         idx++;
     }
 
     ctx.pushCleanupScope();
+    // GC: 注册 this 的清理
+    {
+        SymbolInfo* thisInfo = bodyScope ? bodyScope->lookupLocal("this") : nullptr;
+        if (thisInfo && thisInfo->addr) {
+            ctx.registerCleanup(thisInfo->addr, CleanupKind::GCRoot);
+        }
+    }
     if (body) {
         for (const auto& stmt : body->stmts) {
             stmt->codeGen(ctx);
@@ -334,6 +369,9 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
     }
     structTy->setBody(fieldTypes, false);
     classFieldLayouts[name->ident] = layout;
+
+    // 生成 GC 扫描函数（在设置字段布局后、生成方法前）
+    emitGCScanFunction(ctx, name->ident);
 
     std::string saved = currentClassNameCodegen;
     currentClassNameCodegen = name->ident;

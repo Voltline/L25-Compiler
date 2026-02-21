@@ -431,33 +431,12 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             break;
         }
         case CleanupKind::ClassPtr: {
-            // 加载类指针，非空则调用析构 + free
-            auto it = classStructTypes.find(entry.className);
-            if (it == classStructTypes.end()) break;
-            llvm::StructType* classTy = it->second;
-            llvm::PointerType* classPtrTy = llvm::PointerType::get(classTy, 0);
-            llvm::Value* ptr = ctx.builder.CreateLoad(classPtrTy, entry.addr, "cleanup.cls");
-
-            llvm::BasicBlock* deleteBB = llvm::BasicBlock::Create(ctx.context, "cleanup.cls.del", func);
-            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "cleanup.cls.cont", func);
-
-            llvm::Value* isNull = ctx.builder.CreateICmpEQ(ptr, llvm::ConstantPointerNull::get(classPtrTy));
-            ctx.builder.CreateCondBr(isNull, contBB, deleteBB);
-
-            ctx.builder.SetInsertPoint(deleteBB);
-            // 调用析构函数（如果存在）
-            std::string dtorName = buildDtorName(entry.className);
-            if (llvm::Function* dtorFunc = ctx.module.getFunction(dtorName)) {
-                ctx.builder.CreateCall(dtorFunc, {ptr});
-            }
-            // free
-            llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction("free",
-                llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
-            llvm::Value* castPtr = ctx.builder.CreateBitCast(ptr, i8PtrTy);
-            ctx.builder.CreateCall(freeFn, {castPtr});
-            ctx.builder.CreateBr(contBB);
-
-            ctx.builder.SetInsertPoint(contBB);
+            // GC 模式：仅移除根，让 GC 负责回收
+            ensureGCRuntimeDeclared(ctx);
+            auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+            llvm::Value* rootAddr = ctx.builder.CreateBitCast(entry.addr, i8PtrPtrTy, "cleanup.gc.root");
+            llvm::FunctionCallee removeRootFn = ctx.module.getFunction("l25_gc_remove_root");
+            ctx.builder.CreateCall(removeRootFn, {rootAddr});
             break;
         }
         case CleanupKind::Vector:
@@ -481,6 +460,15 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             ctx.builder.CreateBr(contBB);
 
             ctx.builder.SetInsertPoint(contBB);
+            break;
+        }
+        case CleanupKind::GCRoot: {
+            // GC 根注销（用于 this 指针 / 类指针参数）
+            ensureGCRuntimeDeclared(ctx);
+            auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+            llvm::Value* rootAddr = ctx.builder.CreateBitCast(entry.addr, i8PtrPtrTy, "cleanup.gcroot");
+            llvm::FunctionCallee removeRootFn = ctx.module.getFunction("l25_gc_remove_root");
+            ctx.builder.CreateCall(removeRootFn, {rootAddr});
             break;
         }
     }
@@ -733,4 +721,135 @@ TypeInfo getContainerValueType(const SymbolInfo* symbol)
         return symbol->typeParams[1];
     }
     return TypeInfo{ SymbolKind::Int, {}, 0, false };
+}
+
+// ===== GC 运行时支持 =====
+
+void ensureGCRuntimeDeclared(CodeGenContext& ctx)
+{
+    auto* voidTy  = llvm::Type::getVoidTy(ctx.context);
+    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    auto* i64Ty   = llvm::Type::getInt64Ty(ctx.context);
+    // void** 即 i8** → 用 i8PtrTy 的指针
+    auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+
+    // l25_gc_init(void)
+    if (!ctx.module.getFunction("l25_gc_init")) {
+        ctx.module.getOrInsertFunction("l25_gc_init",
+            llvm::FunctionType::get(voidTy, {}, false));
+    }
+    // l25_gc_shutdown(void)
+    if (!ctx.module.getFunction("l25_gc_shutdown")) {
+        ctx.module.getOrInsertFunction("l25_gc_shutdown",
+            llvm::FunctionType::get(voidTy, {}, false));
+    }
+    // l25_gc_alloc(size, scan_fn, dtor_fn) → i8*
+    if (!ctx.module.getFunction("l25_gc_alloc")) {
+        ctx.module.getOrInsertFunction("l25_gc_alloc",
+            llvm::FunctionType::get(i8PtrTy, {i64Ty, i8PtrTy, i8PtrTy}, false));
+    }
+    // l25_gc_add_root(void** root)
+    if (!ctx.module.getFunction("l25_gc_add_root")) {
+        ctx.module.getOrInsertFunction("l25_gc_add_root",
+            llvm::FunctionType::get(voidTy, {i8PtrPtrTy}, false));
+    }
+    // l25_gc_remove_root(void** root)
+    if (!ctx.module.getFunction("l25_gc_remove_root")) {
+        ctx.module.getOrInsertFunction("l25_gc_remove_root",
+            llvm::FunctionType::get(voidTy, {i8PtrPtrTy}, false));
+    }
+    // l25_gc_collect(void)
+    if (!ctx.module.getFunction("l25_gc_collect")) {
+        ctx.module.getOrInsertFunction("l25_gc_collect",
+            llvm::FunctionType::get(voidTy, {}, false));
+    }
+    // l25_gc_free(i8*)
+    if (!ctx.module.getFunction("l25_gc_free")) {
+        ctx.module.getOrInsertFunction("l25_gc_free",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
+}
+
+void emitGCScanFunction(CodeGenContext& ctx, const std::string& className)
+{
+    auto layoutIt = classFieldLayouts.find(className);
+    if (layoutIt == classFieldLayouts.end()) return;
+
+    // 检查此类是否有需要扫描的类指针字段
+    bool hasPointerFields = false;
+    for (const auto& [fname, ftype] : layoutIt->second) {
+        if (ftype.kind == SymbolKind::Class && ftype.pointerLevel > 0) {
+            hasPointerFields = true;
+            break;
+        }
+    }
+
+    auto* i8PtrTy   = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    auto* voidTy    = llvm::Type::getVoidTy(ctx.context);
+    // mark_fn 类型：void (i8*)
+    auto* markFnTy  = llvm::FunctionType::get(voidTy, {i8PtrTy}, false);
+    auto* markFnPtrTy = llvm::PointerType::get(markFnTy, 0);
+    // scan 函数类型：void (i8*, void(*)(i8*))
+    auto* scanFnTy  = llvm::FunctionType::get(voidTy, {i8PtrTy, markFnPtrTy}, false);
+
+    std::string fnName = "__gc_scan_" + className;
+
+    // 如果没有需要扫描的指针字段，不生成 scan 函数（分配时传 null）
+    if (!hasPointerFields) return;
+
+    // 避免重复生成
+    if (ctx.module.getFunction(fnName)) return;
+
+    llvm::Function* scanFn = llvm::Function::Create(
+        scanFnTy, llvm::Function::InternalLinkage, fnName, ctx.module);
+
+    // 保存当前 builder 状态
+    llvm::BasicBlock* savedBB = ctx.builder.GetInsertBlock();
+    llvm::BasicBlock::iterator savedPt = ctx.builder.GetInsertPoint();
+
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", scanFn);
+    ctx.builder.SetInsertPoint(entry);
+
+    auto argIt = scanFn->arg_begin();
+    llvm::Value* objPtr  = &*argIt; objPtr->setName("obj");
+    llvm::Value* markFn  = &*(argIt + 1); markFn->setName("mark_fn");
+
+    llvm::StructType* structTy = classStructTypes[className];
+    llvm::Value* typedPtr = ctx.builder.CreateBitCast(
+        objPtr, llvm::PointerType::get(structTy, 0), "typed");
+
+    for (size_t i = 0; i < layoutIt->second.size(); i++) {
+        const auto& [fname, ftype] = layoutIt->second[i];
+        if (ftype.kind == SymbolKind::Class && ftype.pointerLevel > 0) {
+            // 获取字段指针
+            llvm::Value* fieldPtr = ctx.builder.CreateStructGEP(
+                structTy, typedPtr, static_cast<unsigned>(i), "field." + fname);
+            // 加载字段值（类指针）
+            llvm::Type* fieldValTy = typeInfoToLLVMType(ftype, ctx.context, true);
+            llvm::Value* fieldVal = ctx.builder.CreateLoad(fieldValTy, fieldPtr, "load." + fname);
+            // 检查非空
+            llvm::BasicBlock* markBB = llvm::BasicBlock::Create(
+                ctx.context, "mark." + fname, scanFn);
+            llvm::BasicBlock* skipBB = llvm::BasicBlock::Create(
+                ctx.context, "skip." + fname, scanFn);
+            llvm::Value* isNull = ctx.builder.CreateICmpEQ(
+                fieldVal,
+                llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(fieldValTy)));
+            ctx.builder.CreateCondBr(isNull, skipBB, markBB);
+
+            ctx.builder.SetInsertPoint(markBB);
+            llvm::Value* castVal = ctx.builder.CreateBitCast(fieldVal, i8PtrTy, "cast." + fname);
+            ctx.builder.CreateCall(markFnTy, markFn, {castVal});
+            ctx.builder.CreateBr(skipBB);
+
+            ctx.builder.SetInsertPoint(skipBB);
+        }
+    }
+
+    ctx.builder.CreateRetVoid();
+
+    // 恢复之前的 builder 状态
+    if (savedBB) {
+        ctx.builder.SetInsertPoint(savedBB, savedPt);
+    }
 }

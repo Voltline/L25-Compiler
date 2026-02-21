@@ -102,6 +102,16 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
                 llvm::AllocaInst* alloca = ctx.builder.CreateAlloca(arg.getType(), nullptr, arg.getName());
                 ctx.builder.CreateStore(&arg, alloca);
                 argInfo->addr = alloca;
+                // GC: 类指针参数注册为根
+                if (arg.getType()->isPointerTy() && params->params[idx]->type.kind == SymbolKind::Class
+                    && params->params[idx]->type.pointerLevel > 0) {
+                    ensureGCRuntimeDeclared(ctx);
+                    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+                    auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
+                    llvm::Value* rootAddr = ctx.builder.CreateBitCast(alloca, i8PtrPtrTy, arg.getName() + ".root");
+                    ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_add_root"), {rootAddr});
+                    ctx.registerCleanup(alloca, CleanupKind::GCRoot);
+                }
             }
             argInfo->value = &arg;
         } else {

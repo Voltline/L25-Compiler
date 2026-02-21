@@ -118,7 +118,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP
 %token ARROW
@@ -447,6 +447,12 @@ stmt:
         $$->lineno = @2.first_line;
         $$->column = @2.first_column;
         delete $3;
+    }
+    | DELETE expr
+    {
+        $$ = new DeleteStmt(std::unique_ptr<Expr>($2));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | INVOKE LPAREN expr COMMA expr RPAREN
     {

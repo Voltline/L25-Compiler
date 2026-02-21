@@ -44,3 +44,9 @@ int32_t getMapKeyTypeTag(const TypeInfo& keyType);
 TypeInfo getContainerElemType(const SymbolInfo* symbol);
 TypeInfo getContainerKeyType(const SymbolInfo* symbol);
 TypeInfo getContainerValueType(const SymbolInfo* symbol);
+
+// ===== GC 运行时函数 =====
+// 声明所有 GC 运行时函数 (l25_gc_*)
+void ensureGCRuntimeDeclared(CodeGenContext& ctx);
+// 为指定类生成 GC 扫描函数 __gc_scan_ClassName
+void emitGCScanFunction(CodeGenContext& ctx, const std::string& className);

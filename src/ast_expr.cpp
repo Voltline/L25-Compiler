@@ -613,7 +613,14 @@ llvm::Value* MemberAccessExpr::getPointer(CodeGenContext& ctx) const
             }
         }
     } else if (auto memberAccess = dynamic_cast<MemberAccessExpr*>(target.get())) {
-        baseValue = memberAccess->getPointer(ctx);
+        // 如果中间成员是指针类型（如 n1.next 的 next: *Node），
+        // 需要 load 得到指针值，而非字段地址
+        TypeInfo memberType = evaluateExprType(target.get());
+        if (memberType.kind == SymbolKind::Class && memberType.pointerLevel > 0) {
+            baseValue = memberAccess->codeGen(ctx);
+        } else {
+            baseValue = memberAccess->getPointer(ctx);
+        }
     } else if (auto arrayAccess = dynamic_cast<ArraySubscriptExpr*>(target.get())) {
         baseValue = arrayAccess->getAddress(ctx);
     }
@@ -903,14 +910,27 @@ llvm::Value* NewExpr::codeGen(CodeGenContext& ctx) const
 
     llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
     llvm::Type* sizeTy = llvm::Type::getInt64Ty(ctx.context);
-    llvm::FunctionCallee mallocFn = ctx.module.getOrInsertFunction(
-        "malloc",
-        llvm::FunctionType::get(i8PtrTy, { sizeTy }, false)
-    );
 
+    // GC 分配：l25_gc_alloc(size, scan_fn, dtor_fn)
+    ensureGCRuntimeDeclared(ctx);
     uint64_t allocSize = ctx.module.getDataLayout().getTypeAllocSize(classTy);
     llvm::Value* sizeVal = llvm::ConstantInt::get(sizeTy, allocSize);
-    llvm::Value* rawPtr = ctx.builder.CreateCall(mallocFn, { sizeVal }, "rawobj");
+
+    // 获取 scan 函数（若此类有指针字段）
+    llvm::Function* scanFunc = ctx.module.getFunction("__gc_scan_" + className->ident);
+    llvm::Value* scanFnPtr = scanFunc
+        ? ctx.builder.CreateBitCast(scanFunc, i8PtrTy)
+        : llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy));
+
+    // 获取析构函数
+    std::string dtorNameStr = buildDtorName(className->ident);
+    llvm::Function* dtorFunc = ctx.module.getFunction(dtorNameStr);
+    llvm::Value* dtorFnPtr = dtorFunc
+        ? ctx.builder.CreateBitCast(dtorFunc, i8PtrTy)
+        : llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy));
+
+    llvm::FunctionCallee gcAllocFn = ctx.module.getFunction("l25_gc_alloc");
+    llvm::Value* rawPtr = ctx.builder.CreateCall(gcAllocFn, { sizeVal, scanFnPtr, dtorFnPtr }, "rawobj");
     llvm::Value* typedPtr = ctx.builder.CreateBitCast(rawPtr, llvm::PointerType::get(classTy, 0), "obj");
 
     size_t argCount = args ? args->args.size() : 0;

@@ -54,9 +54,10 @@ class Scope;
 // ===== RAII 清理类型 =====
 enum class CleanupKind {
     String,      // 释放 string.data
-    ClassPtr,    // 调用 dtor + free
-    Vector,      // l25_vector_destroy（预留）
-    Map,         // l25_map_destroy（预留）
+    ClassPtr,    // GC 模式下仅移除根
+    Vector,      // l25_vector_destroy
+    Map,         // l25_map_destroy
+    GCRoot,      // GC 根注销（this 指针 / 函数参数）
 };
 
 struct CleanupEntry {
