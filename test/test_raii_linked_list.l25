@@ -1,0 +1,69 @@
+program test_raii_linked_list {
+    class Node {
+        let value: int;
+        let next: *Node;
+
+        Node(v) {
+            this.value = v;
+            this.next = nil;
+        }
+
+        ~Node() {
+        }
+
+        func get_value() -> int {
+            return this.value;
+        }
+    }
+
+    class List {
+        let head: *Node;
+        let size: int;
+
+        List() {
+            this.head = nil;
+            this.size = 0;
+        }
+
+        ~List() {
+            let cur: *Node = this.head;
+            while (cur != nil) {
+                let nextNode: *Node;
+                nextNode = cur.next;
+                cur.next = nil;
+                cur = nextNode;
+            };
+        }
+
+        func push_front(v) {
+            let n: *Node = new Node(v);
+            n.next = this.head;
+            this.head = n;
+            this.size = this.size + 1;
+            return 0;
+        }
+
+        func sum() -> int {
+            let total = 0;
+            let cur: *Node = this.head;
+            while (cur != nil) {
+                total = total + cur.get_value();
+                cur = cur.next;
+            };
+            return total;
+        }
+    }
+
+    main {
+        let list: *List = new List();
+        let tmp = list.push_front(10);
+        tmp = list.push_front(20);
+        tmp = list.push_front(30);
+        output(list.sum());
+
+        list = new List();
+        tmp = list.push_front(1);
+        tmp = list.push_front(2);
+        output(list.sum());
+    }
+}

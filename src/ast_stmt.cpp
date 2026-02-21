@@ -96,7 +96,11 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
     if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::String);
     } else if (typeInfo.kind == SymbolKind::Class && typeInfo.pointerLevel > 0) {
-        ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
+        // 仅当初始值来自 new 时注册清理（避免非拥有指针双重释放）
+        if (expr && dynamic_cast<NewExpr*>(expr.get())) {
+            ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
+            symbolInfo->hasCleanup = true;
+        }
     }
 
     // 存在赋值
@@ -104,8 +108,11 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         llvm::Value* initVal = expr->codeGen(ctx);
         if (initVal) {
             // 字符串深拷贝：确保变量拥有独立的 malloc 缓冲区
+            // 但若 RHS 已产生拥有所有权的缓冲区（拼接/函数返回），跳过深拷贝
             if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
-                initVal = emitStringDeepCopy(initVal, ctx);
+                if (!isOwnedStringExpr(expr.get())) {
+                    initVal = emitStringDeepCopy(initVal, ctx);
+                }
             }
             llvm::Type* targetType = valueType;
             llvm::Value* stored = castValueToType(initVal, targetType, ctx);
@@ -174,21 +181,51 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
 
     TypeInfo lhsType = targetSymbol ? typeInfoFromSymbol(targetSymbol) : evaluateExprType(name.get());
 
-    // 字符串赋值：释放旧数据 + 深拷贝新值
+    // 字符串赋值：释放旧数据 + 深拷贝新值（已拥有的缓冲区跳过深拷贝）
     if (lhsType.kind == SymbolKind::String && lhsType.pointerLevel == 0 && lhsAddr) {
         emitStringFree(lhsAddr, ctx);
-        llvm::Value* copied = emitStringDeepCopy(rhs, ctx);
-        ctx.builder.CreateStore(copied, lhsAddr);
-        return copied;
+        llvm::Value* newVal = rhs;
+        if (!isOwnedStringExpr(expr.get())) {
+            newVal = emitStringDeepCopy(rhs, ctx);
+        }
+        ctx.builder.CreateStore(newVal, lhsAddr);
+        return newVal;
     }
-    // 类指针赋值：释放旧指针（调用 dtor + free）
+
+    // 类指针赋值
+    bool isLocalVarLHS = dynamic_cast<IdentExpr*>(name.get()) != nullptr;
+    bool isMemberLHS = dynamic_cast<MemberAccessExpr*>(name.get()) != nullptr;
+
     if (lhsType.kind == SymbolKind::Class && lhsType.pointerLevel > 0 && lhsAddr && !lhsType.className.empty()) {
-        emitClassPtrFree(lhsAddr, lhsType.className, ctx);
+        if (isLocalVarLHS && targetSymbol) {
+            if (targetSymbol->hasCleanup) {
+                // 已注册清理的变量被覆盖时释放旧值
+                emitClassPtrFree(lhsAddr, lhsType.className, ctx);
+            }
+            // let b; b = new Box(); 模式：首次获得所有权时注册清理
+            if (!targetSymbol->hasCleanup && dynamic_cast<NewExpr*>(expr.get())) {
+                ctx.registerCleanup(lhsAddr, CleanupKind::ClassPtr, lhsType.className);
+                targetSymbol->hasCleanup = true;
+            }
+        }
     }
 
     llvm::Type* targetType = typeInfoToLLVMValueType(lhsType, ctx.context);
     llvm::Value* storedValue = castValueToType(rhs, targetType, ctx);
     ctx.builder.CreateStore(storedValue, lhsAddr);
+
+    // 自动移动语义：类指针存储到成员字段时，置空源变量以转移所有权
+    if (isMemberLHS && lhsType.kind == SymbolKind::Class && lhsType.pointerLevel > 0) {
+        if (auto* rhsIdent = dynamic_cast<IdentExpr*>(expr.get())) {
+            SymbolInfo* rhsSym = scope->lookup(rhsIdent->ident);
+            if (rhsSym && rhsSym->addr && storedValue->getType()->isPointerTy()) {
+                ctx.builder.CreateStore(
+                    llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(storedValue->getType())),
+                    rhsSym->addr);
+            }
+        }
+    }
+
     return rhs;
 }
 

@@ -255,6 +255,8 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
                     llvm::StructType* strTy = getL25StringType(ctx.context);
                     ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
                 }
+            } else if (!isOwnedStringExpr(return_value.get())) {
+                retVal = emitStringDeepCopy(retVal, ctx);
             }
         } else if (returnType.kind == SymbolKind::Class && returnType.pointerLevel > 0) {
             if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {

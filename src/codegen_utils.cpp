@@ -515,6 +515,22 @@ void emitStringFree(llvm::Value* strAddr, CodeGenContext& ctx)
     ctx.builder.SetInsertPoint(contBB);
 }
 
+bool isOwnedStringExpr(const Expr* expr)
+{
+    // 字符串拼接产生独立 malloc 缓冲区
+    if (auto* bin = dynamic_cast<const BinaryExpr*>(expr)) {
+        TypeInfo lt = evaluateExprType(bin->lhs.get());
+        TypeInfo rt = evaluateExprType(bin->rhs.get());
+        if (lt.kind == SymbolKind::String || rt.kind == SymbolKind::String) {
+            return true;
+        }
+    }
+    // 函数/方法调用返回的字符串保证拥有所有权的缓冲区
+    if (dynamic_cast<const FuncCallExpr*>(expr)) return true;
+    if (dynamic_cast<const MethodCallExpr*>(expr)) return true;
+    return false;
+}
+
 void emitClassPtrFree(llvm::Value* ptrAddr, const std::string& className, CodeGenContext& ctx)
 {
     auto it = classStructTypes.find(className);

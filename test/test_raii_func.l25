@@ -1,0 +1,81 @@
+program test_raii_func {
+    class Counter {
+        let count: int;
+
+        Counter() {
+            this.count = 0;
+        }
+
+        ~Counter() {
+        }
+
+        func get() -> int {
+            return this.count;
+        }
+
+        func inc() {
+            this.count = this.count + 1;
+            return 0;
+        }
+    }
+
+    class StringHolder {
+        let val: int;
+
+        StringHolder() {
+            this.val = 0;
+        }
+
+        ~StringHolder() {
+        }
+
+        func process() -> int {
+            let local_s: string = "method_local";
+            local_s = "method_reassign";
+            return 0;
+        }
+    }
+
+    func make_string() -> string {
+        let s: string = "from_func";
+        let t: string = "will_be_freed";
+        return s;
+    }
+
+    func make_counter() -> *Counter {
+        let c: *Counter = new Counter();
+        let tmp = c.inc();
+        tmp = c.inc();
+        tmp = c.inc();
+        return c;
+    }
+
+    func use_and_discard() {
+        let c: *Counter = new Counter();
+        let tmp = c.inc();
+        let s: string = "local_string";
+        s = "reassigned";
+        return 0;
+    }
+
+    main {
+        let s: string = make_string();
+        output(s);
+
+        let c: *Counter = make_counter();
+        output(c.get());
+
+        let r = use_and_discard();
+
+        let s2: string = make_string();
+        let s3: string = make_string();
+        s = make_string();
+
+        let h: *StringHolder = new StringHolder();
+        let tmp = h.process();
+        tmp = h.process();
+        tmp = h.process();
+
+        output(s, s2, s3);
+    }
+}

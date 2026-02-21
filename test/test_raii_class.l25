@@ -1,0 +1,53 @@
+program test_raii_class {
+    class Box {
+        let value: int;
+
+        Box() {
+            this.value = 0;
+        }
+
+        ~Box() {
+        }
+
+        func get_value() -> int {
+            return this.value;
+        }
+
+        func set_value(v) {
+            this.value = v;
+            return 0;
+        }
+    }
+
+    main {
+        let b1: *Box = new Box();
+        let tmp = b1.set_value(42);
+        output(b1.get_value());
+
+        let b2: *Box = new Box();
+        tmp = b2.set_value(10);
+        b2 = new Box();
+        tmp = b2.set_value(20);
+        output(b2.get_value());
+
+        if (1 > 0) {
+            let inner_box: *Box = new Box();
+            tmp = inner_box.set_value(99);
+            output(inner_box.get_value());
+        };
+
+        let i = 0;
+        while (i < 5) {
+            let loop_box: *Box = new Box();
+            tmp = loop_box.set_value(i);
+            i = i + 1;
+        };
+
+        let b3: *Box = new Box();
+        b3 = new Box();
+        b3 = new Box();
+        b3 = new Box();
+
+        output(0);
+    }
+}

@@ -55,6 +55,7 @@ struct SymbolInfo
     std::string className;              // 类名（用于类及类指针类型）
     TypeInfo returnType;                // 函数/方法返回类型
     bool hasDestructor = false;         // 类是否定义析构函数
+    bool hasCleanup = false;            // 变量是否已注册 RAII 清理（用于类指针所有权跟踪）
     // 类专用信息
     std::vector<std::pair<std::string, TypeInfo>> classFields; // 记录字段布局
     std::unordered_map<std::string, std::vector<TypeInfo>> methodParamTypes; // 方法参数类型

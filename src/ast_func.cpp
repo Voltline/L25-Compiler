@@ -142,6 +142,9 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
                     llvm::StructType* strTy = getL25StringType(ctx.context);
                     ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
                 }
+            } else if (!isOwnedStringExpr(return_value.get())) {
+                // 非变量且非拥有型表达式（如字符串字面量），深拷贝保证返回拥有权缓冲区
+                retVal = emitStringDeepCopy(retVal, ctx);
             }
         } else if (retTypeInfo.kind == SymbolKind::Class && retTypeInfo.pointerLevel > 0) {
             if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {

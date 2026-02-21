@@ -322,6 +322,34 @@ llvm::Value* BinaryExpr::codeGen(CodeGenContext& ctx) const
         llvm::Value* result = llvm::UndefValue::get(strTy);
         result = ctx.builder.CreateInsertValue(result, newLen, 0, "concat_set_len");
         result = ctx.builder.CreateInsertValue(result, buf, 1, "concat_set_data");
+
+        // 释放中间拼接产生的临时缓冲区（链式 a + b + c 中的中间结果）
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction("free",
+            llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
+        if (isOwnedStringExpr(lhs.get())) {
+            llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* freeLhsBB = llvm::BasicBlock::Create(ctx.context, "concat.free.lhs", func);
+            llvm::BasicBlock* contLhsBB = llvm::BasicBlock::Create(ctx.context, "concat.cont.lhs", func);
+            llvm::Value* lhsNull = ctx.builder.CreateICmpEQ(lhsData, llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+            ctx.builder.CreateCondBr(lhsNull, contLhsBB, freeLhsBB);
+            ctx.builder.SetInsertPoint(freeLhsBB);
+            ctx.builder.CreateCall(freeFn, {lhsData});
+            ctx.builder.CreateBr(contLhsBB);
+            ctx.builder.SetInsertPoint(contLhsBB);
+        }
+        if (isOwnedStringExpr(rhs.get())) {
+            llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+            llvm::BasicBlock* freeRhsBB = llvm::BasicBlock::Create(ctx.context, "concat.free.rhs", func);
+            llvm::BasicBlock* contRhsBB = llvm::BasicBlock::Create(ctx.context, "concat.cont.rhs", func);
+            llvm::Value* rhsNull = ctx.builder.CreateICmpEQ(rhsData, llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+            ctx.builder.CreateCondBr(rhsNull, contRhsBB, freeRhsBB);
+            ctx.builder.SetInsertPoint(freeRhsBB);
+            ctx.builder.CreateCall(freeFn, {rhsData});
+            ctx.builder.CreateBr(contRhsBB);
+            ctx.builder.SetInsertPoint(contRhsBB);
+        }
+
         return result;
     }
 

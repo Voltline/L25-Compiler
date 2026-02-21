@@ -29,3 +29,6 @@ llvm::Value* emitStringDeepCopy(llvm::Value* strVal, CodeGenContext& ctx);
 void emitStringFree(llvm::Value* strAddr, CodeGenContext& ctx);
 // 释放旧类指针并置空（赋值前调用）
 void emitClassPtrFree(llvm::Value* ptrAddr, const std::string& className, CodeGenContext& ctx);
+
+// 判断表达式是否产生拥有所有权的字符串缓冲区（无需深拷贝）
+bool isOwnedStringExpr(const Expr* expr);

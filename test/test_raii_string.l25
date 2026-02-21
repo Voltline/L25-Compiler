@@ -1,0 +1,42 @@
+program test_raii_string {
+    main {
+        // 测试1: 基本字符串声明和作用域结束释放
+        let s1: string = "hello";
+        let s2: string = "world";
+
+        // 测试2: 字符串重新赋值 (旧值应被释放)
+        s1 = "new_hello";
+        s1 = "another";
+
+        // 测试3: 字符串拷贝 (两个独立缓冲区)
+        let s3: string = s1;
+        s3 = "different";
+
+        // 测试4: 字符串拼接临时值 + 赋值
+        let s4: string = s1 + s2;
+        s4 = s1 + s3;
+
+        // 测试5: if 分支中的字符串 (作用域清理)
+        if (1 > 0) {
+            let inner: string = "inside_if";
+            inner = "reassigned";
+        };
+
+        // 测试6: while 循环中的字符串 (每次迭代清理)
+        let i = 0;
+        while (i < 5) {
+            let tmp: string = "loop_str";
+            tmp = "loop_reassign";
+            i = i + 1;
+        };
+
+        // 测试7: 多次赋值
+        let s5: string = "a";
+        s5 = "b";
+        s5 = "c";
+        s5 = "d";
+        s5 = "e";
+
+        output(s1, s2, s3, s4, s5);
+    }
+}
