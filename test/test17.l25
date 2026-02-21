@@ -16,6 +16,5 @@ program test17 {
         let box: *Box;
         box = new Box();
         box.value = 7;
-        delete box;
     }
 }

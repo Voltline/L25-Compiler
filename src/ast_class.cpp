@@ -92,12 +92,14 @@ llvm::Value* CtorDecl::codeGen(CodeGenContext& ctx) const
         idx++;
     }
 
+    ctx.pushCleanupScope();
     if (body) {
         for (const auto& stmt : body->stmts) {
             stmt->codeGen(ctx);
         }
     }
 
+    emitScopeCleanup(ctx);
     ctx.builder.CreateRetVoid();
     return function;
 }
@@ -150,12 +152,14 @@ llvm::Value* DtorDecl::codeGen(CodeGenContext& ctx) const
         }
     }
 
+    ctx.pushCleanupScope();
     if (body) {
         for (const auto& stmt : body->stmts) {
             stmt->codeGen(ctx);
         }
     }
 
+    emitScopeCleanup(ctx);
     ctx.builder.CreateRetVoid();
     return function;
 }
@@ -233,6 +237,7 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
         idx++;
     }
 
+    ctx.pushCleanupScope();
     if (body) {
         for (const auto& stmt : body->stmts) {
             stmt->codeGen(ctx);
@@ -240,6 +245,29 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
     }
 
     llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : defaultValueForType(returnType, ctx);
+
+    // 如果返回字符串变量，先将其数据置空以阻止清理释放返回值
+    if (return_value) {
+        if (returnType.kind == SymbolKind::String && returnType.pointerLevel == 0) {
+            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                SymbolInfo* sym = bodyScope->lookup(identRet->ident);
+                if (sym && sym->addr) {
+                    llvm::StructType* strTy = getL25StringType(ctx.context);
+                    ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
+                }
+            }
+        } else if (returnType.kind == SymbolKind::Class && returnType.pointerLevel > 0) {
+            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                SymbolInfo* sym = bodyScope->lookup(identRet->ident);
+                if (sym && sym->addr) {
+                    llvm::Type* ptrTy = retVal->getType();
+                    ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(ptrTy)), sym->addr);
+                }
+            }
+        }
+    }
+
+    emitScopeCleanup(ctx);
     retVal = castValueToType(retVal, retType, ctx);
     ctx.builder.CreateRet(retVal);
     return function;

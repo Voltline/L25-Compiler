@@ -26,7 +26,6 @@ program linked_list {
                 let nextNode: *Node;
                 nextNode = cur.next;
                 cur.next = nil;
-                delete cur;
                 cur = nextNode;
             };
         }
@@ -86,6 +85,5 @@ program linked_list {
         tmp = list.output_all();
         output(list.sum());
 
-        delete list;
     }
 }

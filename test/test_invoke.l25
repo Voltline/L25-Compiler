@@ -55,6 +55,5 @@ program invoke_test {
             i = i + 1;
         };
 
-        delete c;
     }
 }

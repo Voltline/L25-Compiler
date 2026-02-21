@@ -42,7 +42,6 @@ ident {letter}({letter}|[0-9])*
 "return"    { updateLocationAndColumn(); return RETURN; }
 "this"      { updateLocationAndColumn(); return THIS; }
 "new"       { updateLocationAndColumn(); return NEW; }
-"delete"    { updateLocationAndColumn(); return DELETE; }
 "nil"       { updateLocationAndColumn(); return NIL; }
 "null"      { updateLocationAndColumn(); return NIL; }
 "int"       { updateLocationAndColumn(); return INTSIGN; }

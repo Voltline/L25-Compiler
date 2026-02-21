@@ -345,16 +345,6 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         for (const auto& expr: outputStmt->idents) {
             analyzeExpr(*expr);
         }
-    } else if (auto deleteStmt = dynamic_cast<const DeleteStmt*>(&stmt)) {
-        if (deleteStmt->target) {
-            analyzeExpr(*deleteStmt->target);
-            TypeInfo type = evaluateExprType(deleteStmt->target.get());
-            if (type.kind != SymbolKind::Class || type.pointerLevel <= 0) {
-                reportError(*deleteStmt, "delete 目标必须是类指针");
-            } else if (classDecls.find(type.className) == classDecls.end()) {
-                reportError(*deleteStmt, "未知的类：" + type.className);
-            }
-        }
     } else if (auto funcDefStmt = dynamic_cast<Func*>(&stmt)) {
         const std::string& funcName = funcDefStmt->name->ident;
 

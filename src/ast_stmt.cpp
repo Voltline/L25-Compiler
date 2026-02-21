@@ -92,10 +92,21 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
     SymbolInfo* symbolInfo = scope->lookupLocal(ident_name);
     symbolInfo->addr = alloca;
 
+    // 注册 RAII 清理
+    if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
+        ctx.registerCleanup(alloca, CleanupKind::String);
+    } else if (typeInfo.kind == SymbolKind::Class && typeInfo.pointerLevel > 0) {
+        ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
+    }
+
     // 存在赋值
     if (expr) {
         llvm::Value* initVal = expr->codeGen(ctx);
         if (initVal) {
+            // 字符串深拷贝：确保变量拥有独立的 malloc 缓冲区
+            if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
+                initVal = emitStringDeepCopy(initVal, ctx);
+            }
             llvm::Type* targetType = valueType;
             llvm::Value* stored = castValueToType(initVal, targetType, ctx);
             ctx.builder.CreateStore(stored, alloca);
@@ -162,6 +173,19 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
     }
 
     TypeInfo lhsType = targetSymbol ? typeInfoFromSymbol(targetSymbol) : evaluateExprType(name.get());
+
+    // 字符串赋值：释放旧数据 + 深拷贝新值
+    if (lhsType.kind == SymbolKind::String && lhsType.pointerLevel == 0 && lhsAddr) {
+        emitStringFree(lhsAddr, ctx);
+        llvm::Value* copied = emitStringDeepCopy(rhs, ctx);
+        ctx.builder.CreateStore(copied, lhsAddr);
+        return copied;
+    }
+    // 类指针赋值：释放旧指针（调用 dtor + free）
+    if (lhsType.kind == SymbolKind::Class && lhsType.pointerLevel > 0 && lhsAddr && !lhsType.className.empty()) {
+        emitClassPtrFree(lhsAddr, lhsType.className, ctx);
+    }
+
     llvm::Type* targetType = typeInfoToLLVMValueType(lhsType, ctx.context);
     llvm::Value* storedValue = castValueToType(rhs, targetType, ctx);
     ctx.builder.CreateStore(storedValue, lhsAddr);
@@ -209,22 +233,30 @@ llvm::Value* IfStmt::codeGen(CodeGenContext& ctx) const
     // if-body
     ctx.builder.SetInsertPoint(ifBody);
     ctx.currentBlock = ifBody;
+    ctx.pushCleanupScope();
     if_body->codeGen(ctx);
 
     if (!ctx.currentBlock->getTerminator()) {
         ctx.builder.SetInsertPoint(ctx.currentBlock);
+        emitScopeCleanup(ctx);
         ctx.builder.CreateBr(merge);
+    } else {
+        ctx.popCleanupScope();
     }
 
     // else-body
     if (elseBody) {
         ctx.builder.SetInsertPoint(elseBody);
         ctx.currentBlock = elseBody;
+        ctx.pushCleanupScope();
         else_body->codeGen(ctx);
 
         if (!ctx.currentBlock->getTerminator()) {
             ctx.builder.SetInsertPoint(ctx.currentBlock);
+            emitScopeCleanup(ctx);
             ctx.builder.CreateBr(merge);
+        } else {
+            ctx.popCleanupScope();
         }
     }
 
@@ -276,11 +308,15 @@ llvm::Value* WhileStmt::codeGen(CodeGenContext& ctx) const
     ctx.builder.SetInsertPoint(bodyBlock);
     ctx.currentBlock = bodyBlock;
 
+    ctx.pushCleanupScope();
     loop_body->codeGen(ctx);
 
     if (!ctx.currentBlock->getTerminator()) {
         ctx.builder.SetInsertPoint(ctx.currentBlock);
+        emitScopeCleanup(ctx);
         ctx.builder.CreateBr(condBlock);
+    } else {
+        ctx.popCleanupScope();
     }
 
     // 必须插入 afterBlock，不然后续的代码可能跳不到这里
@@ -354,10 +390,13 @@ llvm::Value* InputStmt::codeGen(CodeGenContext& ctx) const
         }
 
         if (expectString) {
-            // 字符串输入：分配缓冲区，使用 scanf %1023s 读入，再构建 __l25_string
+            // 字符串输入：释放旧缓冲区，再分配新缓冲区
             ensureStringRuntimeDeclared(ctx);
             auto* i64Ty = llvm::Type::getInt64Ty(ctx.context);
             auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+
+            // 先释放旧 string 数据
+            emitStringFree(addr, ctx);
 
             // malloc(1024) 作为临时缓冲区
             llvm::Value* bufSize = llvm::ConstantInt::get(i64Ty, 1024);

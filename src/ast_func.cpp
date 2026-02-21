@@ -120,6 +120,7 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
         idx++;
     }
 
+    ctx.pushCleanupScope();
     for (const auto& stmt: stmts->stmts) {
         if (dynamic_cast<const Func*>(stmt.get())) {
             llvm::IRBuilder<>::InsertPoint savedIP = ctx.builder.saveIP();
@@ -131,6 +132,29 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
     }
 
     llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : defaultValueForType(retTypeInfo, ctx);
+
+    // 如果返回字符串变量，先将其数据置空以阻止清理释放返回值
+    if (return_value) {
+        if (retTypeInfo.kind == SymbolKind::String && retTypeInfo.pointerLevel == 0) {
+            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                SymbolInfo* sym = body_scope->lookup(identRet->ident);
+                if (sym && sym->addr) {
+                    llvm::StructType* strTy = getL25StringType(ctx.context);
+                    ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
+                }
+            }
+        } else if (retTypeInfo.kind == SymbolKind::Class && retTypeInfo.pointerLevel > 0) {
+            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                SymbolInfo* sym = body_scope->lookup(identRet->ident);
+                if (sym && sym->addr) {
+                    llvm::Type* ptrTy = retVal->getType();
+                    ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(ptrTy)), sym->addr);
+                }
+            }
+        }
+    }
+
+    emitScopeCleanup(ctx);
     retVal = castValueToType(retVal, retLLVMType, ctx);
     ctx.builder.CreateRet(retVal);
 

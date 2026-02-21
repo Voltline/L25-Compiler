@@ -87,7 +87,9 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
     ctx.builder.SetInsertPoint(entry);
 
     // 生成main_body的IR
+    ctx.pushCleanupScope();
     main_body->codeGen(ctx);
+    emitScopeCleanup(ctx);
 
     // 添加默认返回
     ctx.builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0));

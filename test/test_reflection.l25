@@ -37,6 +37,5 @@ program reflection_test {
         output(methodname(p, 1));
         output(methodname(p, 2));
 
-        delete p;
     }
 }

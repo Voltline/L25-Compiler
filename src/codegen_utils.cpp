@@ -357,3 +357,190 @@ TypeInfo evaluateExprType(const Expr* expr)
     }
     return TypeInfo{ SymbolKind::Int, {}, 0 };
 }
+
+// ===== RAII 清理实现 =====
+
+void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
+{
+    llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+
+    switch (entry.kind) {
+        case CleanupKind::String: {
+            // 加载 string struct，提取 data 指针，非空则 free
+            llvm::StructType* strTy = getL25StringType(ctx.context);
+            llvm::Value* strVal = ctx.builder.CreateLoad(strTy, entry.addr, "cleanup.str");
+            llvm::Value* dataPtr = ctx.builder.CreateExtractValue(strVal, 1, "cleanup.str.data");
+
+            llvm::BasicBlock* freeBB = llvm::BasicBlock::Create(ctx.context, "cleanup.str.free", func);
+            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "cleanup.str.cont", func);
+
+            llvm::Value* isNull = ctx.builder.CreateICmpEQ(
+                dataPtr, llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+            ctx.builder.CreateCondBr(isNull, contBB, freeBB);
+
+            ctx.builder.SetInsertPoint(freeBB);
+            llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction("free",
+                llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
+            ctx.builder.CreateCall(freeFn, {dataPtr});
+            ctx.builder.CreateBr(contBB);
+
+            ctx.builder.SetInsertPoint(contBB);
+            break;
+        }
+        case CleanupKind::ClassPtr: {
+            // 加载类指针，非空则调用析构 + free
+            auto it = classStructTypes.find(entry.className);
+            if (it == classStructTypes.end()) break;
+            llvm::StructType* classTy = it->second;
+            llvm::PointerType* classPtrTy = llvm::PointerType::get(classTy, 0);
+            llvm::Value* ptr = ctx.builder.CreateLoad(classPtrTy, entry.addr, "cleanup.cls");
+
+            llvm::BasicBlock* deleteBB = llvm::BasicBlock::Create(ctx.context, "cleanup.cls.del", func);
+            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "cleanup.cls.cont", func);
+
+            llvm::Value* isNull = ctx.builder.CreateICmpEQ(ptr, llvm::ConstantPointerNull::get(classPtrTy));
+            ctx.builder.CreateCondBr(isNull, contBB, deleteBB);
+
+            ctx.builder.SetInsertPoint(deleteBB);
+            // 调用析构函数（如果存在）
+            std::string dtorName = buildDtorName(entry.className);
+            if (llvm::Function* dtorFunc = ctx.module.getFunction(dtorName)) {
+                ctx.builder.CreateCall(dtorFunc, {ptr});
+            }
+            // free
+            llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction("free",
+                llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
+            llvm::Value* castPtr = ctx.builder.CreateBitCast(ptr, i8PtrTy);
+            ctx.builder.CreateCall(freeFn, {castPtr});
+            ctx.builder.CreateBr(contBB);
+
+            ctx.builder.SetInsertPoint(contBB);
+            break;
+        }
+        case CleanupKind::Vector:
+        case CleanupKind::Map:
+            // 预留：容器实现后在此添加 l25_vector_destroy / l25_map_destroy 调用
+            break;
+    }
+}
+
+void emitScopeCleanup(CodeGenContext& ctx)
+{
+    if (ctx.cleanupStack.empty()) return;
+    auto& entries = ctx.cleanupStack.back();
+    // 逆序清理
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+        emitCleanupForEntry(ctx, *it);
+    }
+    ctx.popCleanupScope();
+}
+
+void emitReturnCleanup(CodeGenContext& ctx)
+{
+    // 为所有活跃作用域生成清理代码（内层到外层），但不弹出
+    for (int i = static_cast<int>(ctx.cleanupStack.size()) - 1; i >= 0; --i) {
+        auto& entries = ctx.cleanupStack[i];
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+            emitCleanupForEntry(ctx, *it);
+        }
+    }
+}
+
+llvm::Value* emitStringDeepCopy(llvm::Value* strVal, CodeGenContext& ctx)
+{
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+
+    llvm::Value* len = ctx.builder.CreateExtractValue(strVal, 0, "dcopy.len");
+    llvm::Value* data = ctx.builder.CreateExtractValue(strVal, 1, "dcopy.data");
+
+    llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* copyBB = llvm::BasicBlock::Create(ctx.context, "dcopy.copy", func);
+    llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(ctx.context, "dcopy.merge", func);
+
+    llvm::Value* isNull = ctx.builder.CreateICmpEQ(data,
+        llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+    llvm::BasicBlock* entryBB = ctx.builder.GetInsertBlock();
+    ctx.builder.CreateCondBr(isNull, mergeBB, copyBB);
+
+    // 拷贝分支：malloc(len+1) + memcpy
+    ctx.builder.SetInsertPoint(copyBB);
+    llvm::Value* lenI64 = ctx.builder.CreateSExt(len, i64Ty, "dcopy.len64");
+    llvm::Value* allocSize = ctx.builder.CreateAdd(lenI64,
+        llvm::ConstantInt::get(i64Ty, 1), "dcopy.size");
+    llvm::FunctionCallee mallocFn = ctx.module.getOrInsertFunction("malloc",
+        llvm::FunctionType::get(i8PtrTy, {i64Ty}, false));
+    llvm::Value* newData = ctx.builder.CreateCall(mallocFn, {allocSize}, "dcopy.buf");
+    llvm::FunctionCallee memcpyFn = ctx.module.getOrInsertFunction("memcpy",
+        llvm::FunctionType::get(i8PtrTy, {i8PtrTy, i8PtrTy, i64Ty}, false));
+    ctx.builder.CreateCall(memcpyFn, {newData, data, allocSize});
+    llvm::BasicBlock* copyDoneBB = ctx.builder.GetInsertBlock();
+    ctx.builder.CreateBr(mergeBB);
+
+    // 合并：PHI 选择数据指针
+    ctx.builder.SetInsertPoint(mergeBB);
+    llvm::PHINode* phiData = ctx.builder.CreatePHI(i8PtrTy, 2, "dcopy.phi");
+    phiData->addIncoming(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)), entryBB);
+    phiData->addIncoming(newData, copyDoneBB);
+
+    llvm::Value* result = llvm::UndefValue::get(strTy);
+    result = ctx.builder.CreateInsertValue(result, len, 0, "dcopy.set_len");
+    result = ctx.builder.CreateInsertValue(result, phiData, 1, "dcopy.set_data");
+    return result;
+}
+
+void emitStringFree(llvm::Value* strAddr, CodeGenContext& ctx)
+{
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    llvm::Value* oldStr = ctx.builder.CreateLoad(strTy, strAddr, "sfree.old");
+    llvm::Value* oldData = ctx.builder.CreateExtractValue(oldStr, 1, "sfree.data");
+
+    llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* freeBB = llvm::BasicBlock::Create(ctx.context, "sfree.do", func);
+    llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "sfree.done", func);
+
+    llvm::Value* isNull = ctx.builder.CreateICmpEQ(oldData,
+        llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+    ctx.builder.CreateCondBr(isNull, contBB, freeBB);
+
+    ctx.builder.SetInsertPoint(freeBB);
+    llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction("free",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
+    ctx.builder.CreateCall(freeFn, {oldData});
+    ctx.builder.CreateBr(contBB);
+
+    ctx.builder.SetInsertPoint(contBB);
+}
+
+void emitClassPtrFree(llvm::Value* ptrAddr, const std::string& className, CodeGenContext& ctx)
+{
+    auto it = classStructTypes.find(className);
+    if (it == classStructTypes.end()) return;
+    llvm::StructType* classTy = it->second;
+    llvm::PointerType* classPtrTy = llvm::PointerType::get(classTy, 0);
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+
+    llvm::Value* ptr = ctx.builder.CreateLoad(classPtrTy, ptrAddr, "cpfree.old");
+
+    llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* delBB = llvm::BasicBlock::Create(ctx.context, "cpfree.do", func);
+    llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "cpfree.done", func);
+
+    llvm::Value* isNull = ctx.builder.CreateICmpEQ(ptr, llvm::ConstantPointerNull::get(classPtrTy));
+    ctx.builder.CreateCondBr(isNull, contBB, delBB);
+
+    ctx.builder.SetInsertPoint(delBB);
+    std::string dtorName = buildDtorName(className);
+    if (llvm::Function* dtorFunc = ctx.module.getFunction(dtorName)) {
+        ctx.builder.CreateCall(dtorFunc, {ptr});
+    }
+    llvm::FunctionCallee freeFn = ctx.module.getOrInsertFunction("free",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
+    ctx.builder.CreateCall(freeFn, {ctx.builder.CreateBitCast(ptr, i8PtrTy)});
+    ctx.builder.CreateBr(contBB);
+
+    ctx.builder.SetInsertPoint(contBB);
+}

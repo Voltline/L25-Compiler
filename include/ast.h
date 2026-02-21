@@ -51,6 +51,20 @@ struct TypeInfo;
 enum class SymbolKind;
 class Scope;
 
+// ===== RAII 清理类型 =====
+enum class CleanupKind {
+    String,      // 释放 string.data
+    ClassPtr,    // 调用 dtor + free
+    Vector,      // l25_vector_destroy（预留）
+    Map,         // l25_map_destroy（预留）
+};
+
+struct CleanupEntry {
+    llvm::Value* addr;       // 变量的 alloca 地址
+    CleanupKind kind;
+    std::string className;   // 仅用于 ClassPtr（析构函数查找）
+};
+
 struct CodeGenContext
 {
     llvm::LLVMContext& context;
@@ -58,6 +72,18 @@ struct CodeGenContext
     llvm::IRBuilder<>& builder;
     llvm::Function* currentFunction;
     llvm::BasicBlock* currentBlock = nullptr;
+
+    // RAII 清理栈：每个作用域一个 CleanupEntry 列表
+    std::vector<std::vector<CleanupEntry>> cleanupStack;
+
+    void pushCleanupScope() { cleanupStack.emplace_back(); }
+    void popCleanupScope()  { if (!cleanupStack.empty()) cleanupStack.pop_back(); }
+    void registerCleanup(llvm::Value* addr, CleanupKind kind,
+                         const std::string& className = "") {
+        if (!cleanupStack.empty()) {
+            cleanupStack.back().push_back({addr, kind, className});
+        }
+    }
 
     // 构造函数简化传参
     CodeGenContext(llvm::LLVMContext& ctx,
@@ -326,7 +352,7 @@ struct OutputStmt: public Stmt
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
-// delete 语句
+// delete 语句（已弃用：RAII 自动管理资源，保留结构体用于兼容）
 struct DeleteStmt: public Stmt
 {
     std::unique_ptr<Expr> target;
