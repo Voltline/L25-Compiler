@@ -1,0 +1,34 @@
+program TestMap {
+    main {
+        // 基本 map<int, int> 操作
+        let m: map<int, int>;
+        m.set(1, 100);
+        m.set(2, 200);
+        m.set(3, 300);
+        
+        // len
+        output(m.len());
+        
+        // get 方法
+        output(m.get(1));
+        output(m.get(2));
+        output(m.get(3));
+        
+        // 下标读取
+        output(m[1]);
+        output(m[2]);
+        
+        // 下标写入
+        m[3] = 999;
+        output(m[3]);
+        
+        // contains
+        output(m.contains(1));
+        output(m.contains(99));
+        
+        // erase
+        m.erase(2);
+        output(m.len());
+        output(m.contains(2));
+    }
+}

@@ -414,6 +414,46 @@ llvm::Value* ArraySubscriptExpr::codeGen(CodeGenContext& ctx) const {
         return nullptr;
     }
 
+    // ===== Vector 下标读取 =====
+    if (symbol->kind == SymbolKind::Vector) {
+        ensureContainerRuntimeDeclared(ctx);
+        llvm::Value* containerPtr = ctx.builder.CreateLoad(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            symbol->addr, "vec.load");
+        llvm::Value* idx = subscript[0]->codeGen(ctx);
+        idx = castValueToType(idx, llvm::Type::getInt64Ty(ctx.context), ctx);
+        llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_get");
+        llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr, idx}, "vec.sub.ptr");
+        TypeInfo elemType = getContainerElemType(symbol);
+        llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+        llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+        return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "vec.sub.val");
+    }
+
+    // ===== Map 下标读取 =====
+    if (symbol->kind == SymbolKind::Map) {
+        ensureContainerRuntimeDeclared(ctx);
+        llvm::Value* containerPtr = ctx.builder.CreateLoad(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            symbol->addr, "map.load");
+        TypeInfo keyType = getContainerKeyType(symbol);
+        TypeInfo valType = getContainerValueType(symbol);
+        llvm::Type* keyLLVMTy = typeInfoToLLVMValueType(keyType, ctx.context);
+        llvm::Type* valLLVMTy = typeInfoToLLVMValueType(valType, ctx.context);
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        llvm::Value* keyVal = subscript[0]->codeGen(ctx);
+        keyVal = castValueToType(keyVal, keyLLVMTy, ctx);
+        llvm::AllocaInst* keyTmp = ctx.builder.CreateAlloca(keyLLVMTy, nullptr, "map.sub.key");
+        ctx.builder.CreateStore(keyVal, keyTmp);
+        llvm::Value* keyPtr = ctx.builder.CreateBitCast(keyTmp, i8PtrTy);
+        llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_get");
+        llvm::Value* valPtr = ctx.builder.CreateCall(fn, {containerPtr, keyPtr}, "map.sub.ptr");
+        llvm::Value* typedPtr = ctx.builder.CreateBitCast(valPtr, llvm::PointerType::get(valLLVMTy, 0));
+        return ctx.builder.CreateLoad(valLLVMTy, typedPtr, "map.sub.val");
+    }
+
+    // ===== 原始数组下标 =====
+
     llvm::Value* arrayAlloca = symbol->addr;
     llvm::Value* arrayPtr = nullptr;
 
@@ -468,6 +508,45 @@ llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
         reportError("数组: " + array->ident + " 未声明");
         return nullptr;
     }
+
+    // ===== Vector 下标地址（用于 v[i] = x）=====
+    if (symbol->kind == SymbolKind::Vector) {
+        ensureContainerRuntimeDeclared(ctx);
+        llvm::Value* containerPtr = ctx.builder.CreateLoad(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            symbol->addr, "vec.addr.load");
+        llvm::Value* idx = subscript[0]->codeGen(ctx);
+        idx = castValueToType(idx, llvm::Type::getInt64Ty(ctx.context), ctx);
+        llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_get");
+        llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr, idx}, "vec.addr.ptr");
+        TypeInfo elemType = getContainerElemType(symbol);
+        llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+        return ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+    }
+
+    // ===== Map 下标地址（用于 m[k] = v）=====
+    if (symbol->kind == SymbolKind::Map) {
+        ensureContainerRuntimeDeclared(ctx);
+        llvm::Value* containerPtr = ctx.builder.CreateLoad(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            symbol->addr, "map.addr.load");
+        TypeInfo keyType = getContainerKeyType(symbol);
+        TypeInfo valType = getContainerValueType(symbol);
+        llvm::Type* keyLLVMTy = typeInfoToLLVMValueType(keyType, ctx.context);
+        llvm::Type* valLLVMTy = typeInfoToLLVMValueType(valType, ctx.context);
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        llvm::Value* keyVal = subscript[0]->codeGen(ctx);
+        keyVal = castValueToType(keyVal, keyLLVMTy, ctx);
+        llvm::AllocaInst* keyTmp = ctx.builder.CreateAlloca(keyLLVMTy, nullptr, "map.addr.key");
+        ctx.builder.CreateStore(keyVal, keyTmp);
+        llvm::Value* keyPtr = ctx.builder.CreateBitCast(keyTmp, i8PtrTy);
+        // l25_map_get auto-inserts if key doesn't exist
+        llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_get");
+        llvm::Value* valPtr = ctx.builder.CreateCall(fn, {containerPtr, keyPtr}, "map.addr.ptr");
+        return ctx.builder.CreateBitCast(valPtr, llvm::PointerType::get(valLLVMTy, 0));
+    }
+
+    // ===== 原始数组下标地址 =====
 
     llvm::Value* arrayAlloca = symbol->addr;
     llvm::Value* arrayPtr = nullptr;
@@ -634,7 +713,129 @@ void MethodCallExpr::print(int indent) const
 llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
 {
     TypeInfo baseType = evaluateExprType(target.get());
-        llvm::Value* baseValue = nullptr;
+
+    // ===== 容器方法调用分发 =====
+    if (baseType.kind == SymbolKind::Vector || baseType.kind == SymbolKind::Map) {
+        ensureContainerRuntimeDeclared(ctx);
+        // 获取容器指针 (i8*)
+        llvm::Value* containerPtr = target->codeGen(ctx);
+        if (!containerPtr) { reportError("容器变量无效"); return nullptr; }
+
+        // 获取 symbol 以获取 typeParams
+        SymbolInfo* containerSym = nullptr;
+        if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {
+            if (ident->scope) containerSym = ident->scope->lookup(ident->ident);
+        }
+
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+        auto* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+
+        const std::string& mname = method->ident;
+
+        if (baseType.kind == SymbolKind::Vector) {
+            TypeInfo elemType = containerSym ? getContainerElemType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+            if (mname == "push") {
+                // push(elem): alloca elem, store, pass ptr
+                llvm::Value* elemVal = args->args[0]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "vec.push.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_push");
+                ctx.builder.CreateCall(fn, {containerPtr, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "pop") {
+                // pop(): alloca out, call, load and return
+                llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "vec.pop.out");
+                llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_pop");
+                ctx.builder.CreateCall(fn, {containerPtr, outCast});
+                return ctx.builder.CreateLoad(elemLLVMTy, out, "vec.pop.val");
+            } else if (mname == "get") {
+                // get(index): returns ptr to elem, load it
+                llvm::Value* idx = args->args[0]->codeGen(ctx);
+                idx = castValueToType(idx, i64Ty, ctx);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_get");
+                llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr, idx}, "vec.get.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+                return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "vec.get.val");
+            } else if (mname == "set") {
+                // set(index, value)
+                llvm::Value* idx = args->args[0]->codeGen(ctx);
+                idx = castValueToType(idx, i64Ty, ctx);
+                llvm::Value* elemVal = args->args[1]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "vec.set.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_set");
+                ctx.builder.CreateCall(fn, {containerPtr, idx, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "len") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_vector_len");
+                llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "vec.len");
+                return ctx.builder.CreateTrunc(len64, i32Ty, "vec.len.i32");
+            }
+        } else { // Map
+            TypeInfo keyType = containerSym ? getContainerKeyType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            TypeInfo valType = containerSym ? getContainerValueType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            llvm::Type* keyLLVMTy = typeInfoToLLVMValueType(keyType, ctx.context);
+            llvm::Type* valLLVMTy = typeInfoToLLVMValueType(valType, ctx.context);
+
+            // 辅助 lambda: 将 key 值存入 alloca 并返回 i8* 指针
+            auto emitKeyPtr = [&](llvm::Value* keyVal) -> llvm::Value* {
+                keyVal = castValueToType(keyVal, keyLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(keyLLVMTy, nullptr, "map.key.tmp");
+                ctx.builder.CreateStore(keyVal, tmp);
+                return ctx.builder.CreateBitCast(tmp, i8PtrTy);
+            };
+
+            if (mname == "set") {
+                // set(key, value)
+                llvm::Value* keyVal = args->args[0]->codeGen(ctx);
+                llvm::Value* keyPtr = emitKeyPtr(keyVal);
+                llvm::Value* valVal = args->args[1]->codeGen(ctx);
+                valVal = castValueToType(valVal, valLLVMTy, ctx);
+                llvm::AllocaInst* valTmp = ctx.builder.CreateAlloca(valLLVMTy, nullptr, "map.val.tmp");
+                ctx.builder.CreateStore(valVal, valTmp);
+                llvm::Value* valPtr = ctx.builder.CreateBitCast(valTmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_set");
+                ctx.builder.CreateCall(fn, {containerPtr, keyPtr, valPtr});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "get") {
+                // get(key): returns ptr to value, load it
+                llvm::Value* keyVal = args->args[0]->codeGen(ctx);
+                llvm::Value* keyPtr = emitKeyPtr(keyVal);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_get");
+                llvm::Value* valPtr = ctx.builder.CreateCall(fn, {containerPtr, keyPtr}, "map.get.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(valPtr, llvm::PointerType::get(valLLVMTy, 0));
+                return ctx.builder.CreateLoad(valLLVMTy, typedPtr, "map.get.val");
+            } else if (mname == "contains") {
+                llvm::Value* keyVal = args->args[0]->codeGen(ctx);
+                llvm::Value* keyPtr = emitKeyPtr(keyVal);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_contains");
+                return ctx.builder.CreateCall(fn, {containerPtr, keyPtr}, "map.contains");
+            } else if (mname == "erase") {
+                llvm::Value* keyVal = args->args[0]->codeGen(ctx);
+                llvm::Value* keyPtr = emitKeyPtr(keyVal);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_erase");
+                ctx.builder.CreateCall(fn, {containerPtr, keyPtr});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "len") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_len");
+                llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "map.len");
+                return ctx.builder.CreateTrunc(len64, i32Ty, "map.len.i32");
+            }
+        }
+        reportError("未知的容器方法：" + mname);
+        return nullptr;
+    }
+
+    // ===== 类方法调用（原逻辑）=====
+    llvm::Value* baseValue = nullptr;
     if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {
         if (SymbolInfo* symbol = ident->scope->lookup(ident->ident)) {
             if (symbol->kind == SymbolKind::Class && symbol->pointerLevel == 0) {
@@ -809,6 +1010,10 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
         return ctx.builder.CreateLoad(strTy, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
+    } else if (symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Map) {
+        // 容器是不透明指针 (i8*)，直接 load
+        llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        return ctx.builder.CreateLoad(i8PtrTy, symbol->addr, ident);
     }
 
     reportError("不支持返回的标识符: " + ident);

@@ -54,6 +54,8 @@ ident {letter}({letter}|[0-9])*
 "fieldname" { updateLocationAndColumn(); return FIELDNAME; }
 "methodname" { updateLocationAndColumn(); return METHODNAME; }
 "invoke"  { updateLocationAndColumn(); return INVOKE; }
+"vector"    { updateLocationAndColumn(); return VECTOR; }
+"map"       { updateLocationAndColumn(); return MAP; }
 
 {floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }

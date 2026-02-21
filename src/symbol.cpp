@@ -23,6 +23,9 @@ SymbolInfo::SymbolInfo(const std::string& name, const TypeInfo& type)
     if (kind == SymbolKind::String) {
         // String 类型，无额外字段需要设置
     }
+    if (kind == SymbolKind::Vector || kind == SymbolKind::Map) {
+        typeParams = type.typeParams; // 保存泛型参数
+    }
 }
 
 SymbolInfo::SymbolInfo(const std::string& name, const Func& func)

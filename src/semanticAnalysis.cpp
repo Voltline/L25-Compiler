@@ -444,15 +444,25 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             reportError(expr, "数组未声明：" + subscript->array->ident);
             return;
         }
-        if (arraySymbol->kind != SymbolKind::Array) {
-            reportError(*subscript, "尝试访问非数组变量的下标：" + arraySymbol->name);
-            return;
-        }
-        for (auto& idxExpr: subscript->subscript) {
-            analyzeExpr(*idxExpr);
-        }
-        if (arraySymbol->dimensions.size() != subscript->subscript.size()) {
-            reportError(*subscript, "下标访问与数组维度不匹配：" + subscript->array->ident);
+        // 允许 Vector 和 Map 的下标访问
+        if (arraySymbol->kind == SymbolKind::Vector || arraySymbol->kind == SymbolKind::Map) {
+            if (subscript->subscript.size() != 1) {
+                reportError(*subscript, "容器下标访问只允许一个索引");
+                return;
+            }
+            for (auto& idxExpr: subscript->subscript) {
+                analyzeExpr(*idxExpr);
+            }
+        } else if (arraySymbol->kind == SymbolKind::Array) {
+            for (auto& idxExpr: subscript->subscript) {
+                analyzeExpr(*idxExpr);
+            }
+            if (arraySymbol->dimensions.size() != subscript->subscript.size()) {
+                reportError(*subscript, "下标访问与数组维度不匹配：" + subscript->array->ident);
+                return;
+            }
+        } else {
+            reportError(*subscript, "尝试访问非数组/非容器变量的下标：" + arraySymbol->name);
             return;
         }
     } else if (auto addrExpr = dynamic_cast<const AddressOfExpr*>(&expr)) {
@@ -486,6 +496,45 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         analyzeExpr(*methodCall->target);
         TypeInfo targetType = evaluateExprType(methodCall->target.get());
         std::string className = targetType.className;
+
+        // 容器方法调用验证
+        if (targetType.kind == SymbolKind::Vector) {
+            const std::string& mname = methodCall->method->ident;
+            size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+            // 合法方法及参数数量: push(1), pop(0), get(1), set(2), len(0)
+            if (mname == "push" && argCount == 1) { /* ok */ }
+            else if (mname == "pop" && argCount == 0) { /* ok */ }
+            else if (mname == "get" && argCount == 1) { /* ok */ }
+            else if (mname == "set" && argCount == 2) { /* ok */ }
+            else if (mname == "len" && argCount == 0) { /* ok */ }
+            else {
+                reportError(*methodCall, "vector 不存在方法或参数数量不匹配：" + mname);
+                return;
+            }
+            if (methodCall->args) {
+                for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+            }
+            return;
+        }
+        if (targetType.kind == SymbolKind::Map) {
+            const std::string& mname = methodCall->method->ident;
+            size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+            // 合法方法及参数数量: set(2), get(1), contains(1), erase(1), len(0)
+            if (mname == "set" && argCount == 2) { /* ok */ }
+            else if (mname == "get" && argCount == 1) { /* ok */ }
+            else if (mname == "contains" && argCount == 1) { /* ok */ }
+            else if (mname == "erase" && argCount == 1) { /* ok */ }
+            else if (mname == "len" && argCount == 0) { /* ok */ }
+            else {
+                reportError(*methodCall, "map 不存在方法或参数数量不匹配：" + mname);
+                return;
+            }
+            if (methodCall->args) {
+                for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+            }
+            return;
+        }
+
         if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
             targetType.pointerLevel -= 1;
         }

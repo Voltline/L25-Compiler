@@ -1,0 +1,43 @@
+program TestVector {
+    main {
+        // 基本 vector<int> 操作
+        let v: vector<int>;
+        v.push(10);
+        v.push(20);
+        v.push(30);
+        
+        // len
+        output(v.len());
+        
+        // get 方法
+        output(v.get(0));
+        output(v.get(1));
+        output(v.get(2));
+        
+        // 下标读取
+        output(v[0]);
+        output(v[1]);
+        output(v[2]);
+        
+        // set 方法
+        v.set(1, 99);
+        output(v[1]);
+        
+        // 下标写入
+        v[2] = 42;
+        output(v[2]);
+        
+        // pop
+        let popped: int = v.pop();
+        output(popped);
+        output(v.len());
+        
+        // vector<float> 测试
+        let vf: vector<float>;
+        vf.push(1.5);
+        vf.push(2.5);
+        output(vf[0]);
+        output(vf[1]);
+        output(vf.len());
+    }
+}

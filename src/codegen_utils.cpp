@@ -98,6 +98,9 @@ llvm::Type* typeInfoToLLVMType(const TypeInfo& typeInfo, llvm::LLVMContext& ctx,
         }
     } else if (typeInfo.kind == SymbolKind::String) {
         baseType = getL25StringType(ctx);
+    } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map) {
+        // 容器类型在 IR 层是不透明指针 (i8*)
+        baseType = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0);
     }
 
     if (!baseType) return nullptr;
@@ -130,6 +133,8 @@ llvm::Type* typeInfoToLLVMValueType(const TypeInfo& typeInfo, llvm::LLVMContext&
         }
     } else if (typeInfo.kind == SymbolKind::String) {
         baseType = getL25StringType(ctx);
+    } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map) {
+        baseType = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0);
     } else {
         baseType = scalarType;
     }
@@ -224,7 +229,9 @@ std::string buildDtorName(const std::string& className)
 TypeInfo typeInfoFromSymbol(const SymbolInfo* symbol)
 {
     if (!symbol) return TypeInfo{};
-    return TypeInfo{ symbol->kind, symbol->dimensions, symbol->pointerLevel, symbol->isFloat, symbol->className };
+    TypeInfo ti{ symbol->kind, symbol->dimensions, symbol->pointerLevel, symbol->isFloat, symbol->className };
+    ti.typeParams = symbol->typeParams;
+    return ti;
 }
 
 TypeInfo evaluateExprType(const Expr* expr)
@@ -271,6 +278,14 @@ TypeInfo evaluateExprType(const Expr* expr)
     if (auto arrayExpr = dynamic_cast<const ArraySubscriptExpr*>(expr)) {
         Scope* lookupScope = arrayExpr->scope ? arrayExpr->scope : (arrayExpr->array ? arrayExpr->array->scope : nullptr);
         SymbolInfo* symbol = lookupScope ? lookupScope->lookup(arrayExpr->array->ident) : nullptr;
+        if (symbol) {
+            if (symbol->kind == SymbolKind::Vector) {
+                return getContainerElemType(symbol);
+            }
+            if (symbol->kind == SymbolKind::Map) {
+                return getContainerValueType(symbol);
+            }
+        }
         bool isFloatElem = symbol && symbol->isFloat;
         return TypeInfo{ isFloatElem ? SymbolKind::Float : SymbolKind::Int, {}, 0, isFloatElem };
     }
@@ -336,6 +351,33 @@ TypeInfo evaluateExprType(const Expr* expr)
     }
     if (auto methodCall = dynamic_cast<const MethodCallExpr*>(expr)) {
         TypeInfo targetType = evaluateExprType(methodCall->target.get());
+        // 容器方法返回类型
+        if (targetType.kind == SymbolKind::Vector) {
+            const std::string& mname = methodCall->method->ident;
+            // 从 target 获取 symbol 以获取 typeParams
+            SymbolInfo* sym = nullptr;
+            if (auto ident = dynamic_cast<const IdentExpr*>(methodCall->target.get())) {
+                if (ident->scope) sym = ident->scope->lookup(ident->ident);
+            }
+            if (mname == "get" || mname == "pop") {
+                return sym ? getContainerElemType(sym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            }
+            if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            return TypeInfo{ SymbolKind::Int, {}, 0 }; // push/set return void, but we report Int
+        }
+        if (targetType.kind == SymbolKind::Map) {
+            const std::string& mname = methodCall->method->ident;
+            SymbolInfo* sym = nullptr;
+            if (auto ident = dynamic_cast<const IdentExpr*>(methodCall->target.get())) {
+                if (ident->scope) sym = ident->scope->lookup(ident->ident);
+            }
+            if (mname == "get") {
+                return sym ? getContainerValueType(sym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            }
+            if (mname == "contains") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            return TypeInfo{ SymbolKind::Int, {}, 0 };
+        }
         std::string className = targetType.className;
         if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
             className = targetType.className;
@@ -419,9 +461,28 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             break;
         }
         case CleanupKind::Vector:
-        case CleanupKind::Map:
-            // 预留：容器实现后在此添加 l25_vector_destroy / l25_map_destroy 调用
+        case CleanupKind::Map: {
+            // 加载容器指针，非空则调用 l25_vector_destroy / l25_map_destroy
+            llvm::Value* ptr = ctx.builder.CreateLoad(i8PtrTy, entry.addr, "cleanup.container");
+
+            llvm::BasicBlock* destroyBB = llvm::BasicBlock::Create(ctx.context, "cleanup.container.del", func);
+            llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "cleanup.container.cont", func);
+
+            llvm::Value* isNull = ctx.builder.CreateICmpEQ(
+                ptr, llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+            ctx.builder.CreateCondBr(isNull, contBB, destroyBB);
+
+            ctx.builder.SetInsertPoint(destroyBB);
+            std::string destroyFnName = (entry.kind == CleanupKind::Vector)
+                ? "l25_vector_destroy" : "l25_map_destroy";
+            llvm::FunctionCallee destroyFn = ctx.module.getOrInsertFunction(destroyFnName,
+                llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
+            ctx.builder.CreateCall(destroyFn, {ptr});
+            ctx.builder.CreateBr(contBB);
+
+            ctx.builder.SetInsertPoint(contBB);
             break;
+        }
     }
 }
 
@@ -559,4 +620,117 @@ void emitClassPtrFree(llvm::Value* ptrAddr, const std::string& className, CodeGe
     ctx.builder.CreateBr(contBB);
 
     ctx.builder.SetInsertPoint(contBB);
+}
+
+// ===== 容器运行时支持 =====
+
+void ensureContainerRuntimeDeclared(CodeGenContext& ctx)
+{
+    auto* voidTy = llvm::Type::getVoidTy(ctx.context);
+    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+    auto* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+
+    // Vector API
+    if (!ctx.module.getFunction("l25_vector_create")) {
+        ctx.module.getOrInsertFunction("l25_vector_create",
+            llvm::FunctionType::get(i8PtrTy, {i64Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_vector_destroy")) {
+        ctx.module.getOrInsertFunction("l25_vector_destroy",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_vector_push")) {
+        ctx.module.getOrInsertFunction("l25_vector_push",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_vector_pop")) {
+        ctx.module.getOrInsertFunction("l25_vector_pop",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_vector_get")) {
+        ctx.module.getOrInsertFunction("l25_vector_get",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy, i64Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_vector_set")) {
+        ctx.module.getOrInsertFunction("l25_vector_set",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i64Ty, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_vector_len")) {
+        ctx.module.getOrInsertFunction("l25_vector_len",
+            llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
+    }
+
+    // Map API
+    if (!ctx.module.getFunction("l25_map_create")) {
+        ctx.module.getOrInsertFunction("l25_map_create",
+            llvm::FunctionType::get(i8PtrTy, {i64Ty, i64Ty, i32Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_map_destroy")) {
+        ctx.module.getOrInsertFunction("l25_map_destroy",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_map_set")) {
+        ctx.module.getOrInsertFunction("l25_map_set",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_map_get")) {
+        ctx.module.getOrInsertFunction("l25_map_get",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_map_contains")) {
+        ctx.module.getOrInsertFunction("l25_map_contains",
+            llvm::FunctionType::get(i32Ty, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_map_erase")) {
+        ctx.module.getOrInsertFunction("l25_map_erase",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_map_len")) {
+        ctx.module.getOrInsertFunction("l25_map_len",
+            llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
+    }
+}
+
+uint64_t getTypeAllocSize(const TypeInfo& typeInfo, CodeGenContext& ctx)
+{
+    llvm::Type* ty = typeInfoToLLVMValueType(typeInfo, ctx.context);
+    if (!ty) return 4; // fallback to i32
+    return ctx.module.getDataLayout().getTypeAllocSize(ty);
+}
+
+int32_t getMapKeyTypeTag(const TypeInfo& keyType)
+{
+    if (keyType.kind == SymbolKind::Int) return 0;   // L25_KEY_INT
+    if (keyType.kind == SymbolKind::Float) return 1;  // L25_KEY_FLOAT
+    if (keyType.kind == SymbolKind::String) return 2;  // L25_KEY_STRING
+    if (keyType.pointerLevel > 0) return 3;            // L25_KEY_PTR
+    return 4;                                          // L25_KEY_OTHER
+}
+
+TypeInfo getContainerElemType(const SymbolInfo* symbol)
+{
+    if (!symbol) return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    if (symbol->kind == SymbolKind::Vector && !symbol->typeParams.empty()) {
+        return symbol->typeParams[0];
+    }
+    return TypeInfo{ SymbolKind::Int, {}, 0, false };
+}
+
+TypeInfo getContainerKeyType(const SymbolInfo* symbol)
+{
+    if (!symbol) return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    if (symbol->kind == SymbolKind::Map && !symbol->typeParams.empty()) {
+        return symbol->typeParams[0];
+    }
+    return TypeInfo{ SymbolKind::Int, {}, 0, false };
+}
+
+TypeInfo getContainerValueType(const SymbolInfo* symbol)
+{
+    if (!symbol) return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    if (symbol->kind == SymbolKind::Map && symbol->typeParams.size() >= 2) {
+        return symbol->typeParams[1];
+    }
+    return TypeInfo{ SymbolKind::Int, {}, 0, false };
 }

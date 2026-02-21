@@ -83,6 +83,36 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(valueType)), alloca);
     }
 
+    // Vector/Map 自动创建
+    if (typeInfo.kind == SymbolKind::Vector && typeInfo.pointerLevel == 0) {
+        ensureContainerRuntimeDeclared(ctx);
+        // 计算元素大小
+        TypeInfo elemType = typeInfo.typeParams.empty() ? TypeInfo{ SymbolKind::Int, {}, 0 } : typeInfo.typeParams[0];
+        uint64_t elemSize = getTypeAllocSize(elemType, ctx);
+        llvm::Value* elemSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), elemSize);
+        llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_vector_create",
+            llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+                                    {llvm::Type::getInt64Ty(ctx.context)}, false));
+        llvm::Value* vecPtr = ctx.builder.CreateCall(createFn, {elemSizeVal}, "vec.create");
+        ctx.builder.CreateStore(vecPtr, alloca);
+    } else if (typeInfo.kind == SymbolKind::Map && typeInfo.pointerLevel == 0) {
+        ensureContainerRuntimeDeclared(ctx);
+        TypeInfo keyType = typeInfo.typeParams.size() >= 1 ? typeInfo.typeParams[0] : TypeInfo{ SymbolKind::Int, {}, 0 };
+        TypeInfo valType = typeInfo.typeParams.size() >= 2 ? typeInfo.typeParams[1] : TypeInfo{ SymbolKind::Int, {}, 0 };
+        uint64_t keySize = getTypeAllocSize(keyType, ctx);
+        uint64_t valSize = getTypeAllocSize(valType, ctx);
+        int32_t keyTag = getMapKeyTypeTag(keyType);
+        llvm::Value* keySizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), keySize);
+        llvm::Value* valSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), valSize);
+        llvm::Value* keyTagVal = llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), keyTag);
+        llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_map_create",
+            llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+                                    {llvm::Type::getInt64Ty(ctx.context), llvm::Type::getInt64Ty(ctx.context),
+                                     llvm::Type::getInt32Ty(ctx.context)}, false));
+        llvm::Value* mapPtr = ctx.builder.CreateCall(createFn, {keySizeVal, valSizeVal, keyTagVal}, "map.create");
+        ctx.builder.CreateStore(mapPtr, alloca);
+    }
+
     if (!alloca) {
         reportError("无法为变量: " + ident_name + " 分配空间");
         return nullptr;
@@ -101,6 +131,12 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
             ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
             symbolInfo->hasCleanup = true;
         }
+    } else if (typeInfo.kind == SymbolKind::Vector && typeInfo.pointerLevel == 0) {
+        ctx.registerCleanup(alloca, CleanupKind::Vector);
+        symbolInfo->hasCleanup = true;
+    } else if (typeInfo.kind == SymbolKind::Map && typeInfo.pointerLevel == 0) {
+        ctx.registerCleanup(alloca, CleanupKind::Map);
+        symbolInfo->hasCleanup = true;
     }
 
     // 存在赋值

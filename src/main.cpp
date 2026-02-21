@@ -168,7 +168,23 @@ int main(int argc, const char* argv[])
             return 1;
         }
 
-        std::string cmd = llvmAs + " " + llFile + " -o " + bcFile + " && " + clangBin + " " + bcFile + " -o " + outputFile;
+        // 尝试找到运行时库进行链接
+        std::string runtimeLib;
+        std::filesystem::path exePath = std::filesystem::canonical("/proc/self/exe");
+        std::filesystem::path exeDir = exePath.parent_path();
+        // 搜索运行时库：与 l25cc 同目录，或当前目录
+        for (auto& candidate : {exeDir / "libl25rt.a", std::filesystem::path("libl25rt.a")}) {
+            if (std::filesystem::exists(candidate)) {
+                runtimeLib = candidate.string();
+                break;
+            }
+        }
+
+        std::string cmd = llvmAs + " " + llFile + " -o " + bcFile + " && " + clangBin + " " + bcFile;
+        if (!runtimeLib.empty()) {
+            cmd += " " + runtimeLib;
+        }
+        cmd += " -o " + outputFile + " -lm";
         int ret = system(cmd.c_str());
         if (ret != 0) {
             std::cerr << "链接失败: llvm-as 或 clang 报错\n";

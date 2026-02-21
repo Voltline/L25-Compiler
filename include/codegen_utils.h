@@ -32,3 +32,15 @@ void emitClassPtrFree(llvm::Value* ptrAddr, const std::string& className, CodeGe
 
 // 判断表达式是否产生拥有所有权的字符串缓冲区（无需深拷贝）
 bool isOwnedStringExpr(const Expr* expr);
+
+// ===== 容器运行时函数 =====
+// 声明所有容器运行时函数 (l25_vector_*, l25_map_*)
+void ensureContainerRuntimeDeclared(CodeGenContext& ctx);
+// 计算 TypeInfo 对应的 LLVM 类型的字节大小
+uint64_t getTypeAllocSize(const TypeInfo& typeInfo, CodeGenContext& ctx);
+// 获取 map key type tag (L25_KEY_INT=0, L25_KEY_FLOAT=1, L25_KEY_STRING=2)
+int32_t getMapKeyTypeTag(const TypeInfo& keyType);
+// 从 TypeInfo 获取容器元素类型（vector → typeParams[0], map → typeParams[1] for value）
+TypeInfo getContainerElemType(const SymbolInfo* symbol);
+TypeInfo getContainerKeyType(const SymbolInfo* symbol);
+TypeInfo getContainerValueType(const SymbolInfo* symbol);

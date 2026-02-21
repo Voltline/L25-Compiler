@@ -17,13 +17,15 @@ enum class SymbolKind {
     Array,
     Pointer,
     Class,
+    Vector,
+    Map,
     Function,
     Program,
     Invalid
 };
 
 const char* const SymbolName[] {
-    "Int", "Float", "String", "Array", "Pointer", "Class", "Function", "Program", "Invalid"
+    "Int", "Float", "String", "Array", "Pointer", "Class", "Vector", "Map", "Function", "Program", "Invalid"
 };
 
 struct TypeInfo
@@ -33,6 +35,7 @@ struct TypeInfo
     int pointerLevel; // 指针层级
     bool isFloat; // 是否为浮点类型
     std::string className; // 类名（仅用于类/类指针类型）
+    std::vector<TypeInfo> typeParams; // 泛型参数（vector<int> → [Int], map<string,int> → [String, Int]）
 
     TypeInfo();
     TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false, std::string className = "");
@@ -56,6 +59,7 @@ struct SymbolInfo
     TypeInfo returnType;                // 函数/方法返回类型
     bool hasDestructor = false;         // 类是否定义析构函数
     bool hasCleanup = false;            // 变量是否已注册 RAII 清理（用于类指针所有权跟踪）
+    std::vector<TypeInfo> typeParams;   // 泛型参数（Vector/Map）
     // 类专用信息
     std::vector<std::pair<std::string, TypeInfo>> classFields; // 记录字段布局
     std::unordered_map<std::string, std::vector<TypeInfo>> methodParamTypes; // 方法参数类型

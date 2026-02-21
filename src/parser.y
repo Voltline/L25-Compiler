@@ -120,6 +120,7 @@ extern Program* rootProgram;
 
 %token PROGRAM FUNC MAIN LET IF ELSE WHILE INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
+%token VECTOR MAP
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
@@ -426,6 +427,26 @@ stmt:
     | nested_func_stmt
     {
         $$ = $1;
+    }
+    | factor DOT IDENT LPAREN RPAREN
+    {
+        auto* methodCall = new MethodCallExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3), nullptr);
+        methodCall->lineno = @2.first_line;
+        methodCall->column = @2.first_column;
+        $$ = new ExprStmt(std::unique_ptr<Expr>(methodCall));
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+        delete $3;
+    }
+    | factor DOT IDENT LPAREN arg_list RPAREN
+    {
+        auto* methodCall = new MethodCallExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3), std::unique_ptr<ArgList>($5));
+        methodCall->lineno = @2.first_line;
+        methodCall->column = @2.first_column;
+        $$ = new ExprStmt(std::unique_ptr<Expr>(methodCall));
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+        delete $3;
     }
     | INVOKE LPAREN expr COMMA expr RPAREN
     {
@@ -984,6 +1005,20 @@ base_type:
     {
         $$ = new TypeInfo{ SymbolKind::Class, {}, 0, false, *$1 };
         delete $1;
+    }
+    | VECTOR LT type_info GT
+    {
+        $$ = new TypeInfo{ SymbolKind::Vector, {}, 0, false };
+        $$->typeParams.push_back(*$3);
+        delete $3;
+    }
+    | MAP LT type_info COMMA type_info GT
+    {
+        $$ = new TypeInfo{ SymbolKind::Map, {}, 0, false };
+        $$->typeParams.push_back(*$3);
+        $$->typeParams.push_back(*$5);
+        delete $3;
+        delete $5;
     }
     ;
 %%

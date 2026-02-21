@@ -35,7 +35,7 @@ BASE_CXXFLAGS = -std=c++20 -Wall $(LLVM_CXXFLAGS) -I$(FLEX_INCLUDE) -I$(INCDIR) 
 CXXFLAGS ?= $(BASE_CXXFLAGS)
 
 # 默认目标
-all: l25cc
+all: l25cc libl25rt.a
 
 # debug 目标，附加调试和地址消毒器选项
 debug: CXXFLAGS += -g -fsanitize=address -fno-omit-frame-pointer
@@ -105,7 +105,20 @@ errorReporter.o: $(SRCDIR)/errorReporter.cpp $(INCDIR)/errorReporter.h
 main.o: $(SRCDIR)/main.cpp
 	$(CXX) $(CXXFLAGS) -c $(SRCDIR)/main.cpp
 
+# ===== 运行时库 =====
+RUNTIME_DIR = runtime
+CC = clang-18
+
+l25_vector.o: $(RUNTIME_DIR)/l25_vector.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_vector.c -I$(RUNTIME_DIR) -o l25_vector.o
+
+l25_map.o: $(RUNTIME_DIR)/l25_map.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_map.c -I$(RUNTIME_DIR) -o l25_map.o
+
+libl25rt.a: l25_vector.o l25_map.o
+	ar rcs libl25rt.a l25_vector.o l25_map.o
+
 clean:
-	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output
+	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output libl25rt.a
 
 .PHONY: all clean debug test
