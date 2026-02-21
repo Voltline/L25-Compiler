@@ -209,6 +209,61 @@ program dynamic_call {
 ```
 &emsp; `invoke` returns `int` (method return values of other types are cast to `int`). It matches candidate methods by argument count and dispatches via `strcmp` at runtime.
 
+* 📦 *Generic Containers — Vector and Map*:
+```L25
+program containers {
+    main {
+        // vector<int>
+        let v: vector<int>;
+        v.push(10);
+        v.push(20);
+        v.push(30);
+        output(v.len());       // 3
+        output(v[0], v[1]);    // 10 20
+        v[1] = 99;
+        output(v.get(1));      // 99
+        let x: int = v.pop();
+        output(x);             // 30
+
+        // map<int, int>
+        let m: map<int, int>;
+        m.set(1, 100);
+        m[2] = 200;
+        output(m.get(1));      // 100
+        output(m[2]);          // 200
+        output(m.contains(1)); // 1
+        m.erase(1);
+        output(m.len());       // 1
+    }
+}
+```
+&emsp; Vectors support `push`, `pop`, `get`, `set`, `len`, and bracket subscript (`v[i]` / `v[i] = val`).  Maps support `set`, `get`, `contains`, `erase`, `len`, and bracket subscript (`m[k]` / `m[k] = val`).  Both containers are automatically freed when they go out of scope.
+
+* ♻️ *Mark-and-Sweep Garbage Collection*:
+```L25
+program gc_demo {
+    class Node {
+        let value: int;
+        let next: *Node;
+        Node(v: int) { this.value = v; }
+    }
+
+    main {
+        let a: *Node = new Node(1);
+        let b: *Node = new Node(2);
+        a.next = b;
+        b.next = a; // circular reference — GC handles it
+        output(a.value, b.value);
+
+        // deterministic delete is still available
+        let c: *Node = new Node(42);
+        output(c.value);
+        delete c;
+    }
+}
+```
+&emsp; Class instances allocated with `new` are managed by a built-in mark-and-sweep garbage collector. Local class-pointer variables, `this`, and class-pointer function parameters are automatically registered as GC roots. The collector runs when the allocation threshold is exceeded. `delete` remains available for deterministic cleanup. Strings, vectors, and maps continue to use RAII and are not GC-managed.
+
 * 🧾 *Procedures without explicit return values*:
 ```L25
 func log_message(msg) {
@@ -297,7 +352,7 @@ program linked_list {
 
         Node(v) {
             this.value = v;
-            this.next = 0;
+            this.next = nil;
         }
 
         ~Node() {}
@@ -306,31 +361,29 @@ program linked_list {
     class List {
         let head: *Node;
 
-        List() { this.head = 0; }
+        List() { this.head = nil; }
         ~List() {
-            let cur: *Node; cur = this.head;
-            while (cur != 0) {
-                let nxt: *Node; nxt = cur.next;
-                cur.next = 0; // avoid cascading deletion
-                delete cur;
+            let cur: *Node = this.head;
+            while (cur != nil) {
+                let nxt: *Node = cur.next;
+                cur.next = nil;
                 cur = nxt;
             };
         }
 
         func push_back(v) {
-            let n: *Node;
-            n = new Node(v);
-            if (this.head == 0) { this.head = n; }
+            let n: *Node = new Node(v);
+            if (this.head == nil) { this.head = n; }
             else {
-                let cur: *Node; cur = this.head;
-                while (cur.next != 0) { cur = cur.next; };
+                let cur: *Node = this.head;
+                while (cur.next != nil) { cur = cur.next; };
                 cur.next = n;
             };
         }
 
         func print() {
-            let cur: *Node; cur = this.head;
-            while (cur != 0) {
+            let cur: *Node = this.head;
+            while (cur != nil) {
                 output(cur.value);
                 cur = cur.next;
             };
@@ -338,14 +391,13 @@ program linked_list {
     }
 
     main {
-        let list: *List;
+        let list: *List = new List();
         let tmp: int;
-        list = new List();
         tmp = list.push_back(1);
         tmp = list.push_back(2);
         tmp = list.push_back(3);
         tmp = list.print();
-        delete list; // iteratively releases every node
+        delete list;
     }
 }
 ```
@@ -540,6 +592,8 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
       <base_type>
     | "[" <dim_list> "]" [ <base_type> ]
     | "*" <type_info>
+    | "vector" "<" <base_type> ">"
+    | "map" "<" <base_type> "," <base_type> ">"
 
 <base_type> =
     "int" | "float" | "string" | <ident>
@@ -564,12 +618,12 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 
 ```
 
-Constructors share the class name and can be defined with any parameter list. The `new ClassName(...)` expression allocates an instance on the heap, resolves a constructor by matching the argument count, and returns a pointer to the class type. Declare the receiving variable accordingly (for example, `let p: *Point = new Point(1, 2);`). If no constructor exists and no arguments are provided, the runtime zero-initializes the allocated storage instead.
+Constructors share the class name and can be defined with any parameter list. The `new ClassName(...)` expression allocates an instance on the heap via the GC allocator, resolves a constructor by matching the argument count, and returns a pointer to the class type. Declare the receiving variable accordingly (for example, `let p: *Point = new Point(1, 2);`). If no constructor exists and no arguments are provided, the runtime zero-initializes the allocated storage instead.
 
-Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use the `delete <expr>;` statement to destroy a heap object: it first checks for null, invokes the destructor if present, and then releases the memory. Pair every `new` with a corresponding `delete` to avoid leaks because automatic garbage collection is not available yet.
+Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use the `delete <expr>;` statement to deterministically destroy a heap object: it first checks for null, invokes the destructor if present, removes the object from the GC list, and then releases the memory. You may also let the GC reclaim unreachable objects automatically at shutdown or when the allocation threshold is exceeded.
 
 ## ⚠️ Notes & Limitations
-- `this` can only be used inside class methods.
+- `this` can only be used inside class methods, constructors and destructors.
 - Class methods do **not** support overloading.
 - All class fields must be declared explicitly using `let`.
 - The `extends` keyword is parsed but inheritance semantics (field/method resolution from base class) are **not yet implemented**.
@@ -577,8 +631,11 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - Classes are passed by reference-like semantics when used as variables.
 - Member access and method calls are left-associative:
   `a.b.c()` is parsed as `(a.b).c()`.
+- Chained pointer member access is supported: `node.next.value` correctly loads intermediate pointers.
 - Class definitions are only allowed at the top level of a program.
 - Nested class definitions are not supported.
+- The GC only scans class-pointer fields for reachability; containers (`vector`/`map`) holding class pointers are **not** scanned by the collector.
+- Strings, vectors, and maps use scope-based RAII cleanup and are not managed by the GC.
 
 
 ## 🛠️ Build Instructions
