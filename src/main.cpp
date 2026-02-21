@@ -13,9 +13,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 
-#include "include/ast.h"
-#include "include/errorReporter.h"
-#include "include/semanticAnalysis.h"
+#include "ast.h"
+#include "errorReporter.h"
+#include "semanticAnalysis.h"
 #include "parser.tab.hpp"
 
 extern int yyparse();

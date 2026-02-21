@@ -1,5 +1,5 @@
-#include "include/symbol.h"
-#include "include/ast.h"
+#include "symbol.h"
+#include "ast.h"
 
 /* SymbolInfo 方法定义 */
 SymbolInfo::SymbolInfo(SymbolKind kind, const std::string& name)

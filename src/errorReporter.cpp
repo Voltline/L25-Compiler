@@ -1,5 +1,5 @@
-#include "include/errorReporter.h"
-#include "include/ast.h"
+#include "errorReporter.h"
+#include "ast.h"
 
 #include <algorithm>
 #include <fstream>

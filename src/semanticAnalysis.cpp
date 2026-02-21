@@ -1,5 +1,5 @@
-#include "include/semanticAnalysis.h"
-#include "include/errorReporter.h"
+#include "semanticAnalysis.h"
+#include "errorReporter.h"
 #include <algorithm>
 extern bool hasError;
 

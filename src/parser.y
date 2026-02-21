@@ -3,14 +3,14 @@
 %define lr.type ielr
 %glr-parser
 %code requires {
-#include "include/ast.h"
+#include "ast.h"
 struct ClassMemberAggregate;
 }
 
 %{
-#include "include/ast.h"
-#include "include/errorReporter.h"
-#include "include/symbol.h"
+#include "ast.h"
+#include "errorReporter.h"
+#include "symbol.h"
 #include <memory>
 #include <cstdio>
 #include <cstdlib>

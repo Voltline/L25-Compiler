@@ -1,8 +1,8 @@
 %option noyymore noinput nounput
 %option yylineno
 %{
-#include "include/ast.h"
-#include "include/errorReporter.h"
+#include "ast.h"
+#include "errorReporter.h"
 #include "parser.tab.hpp"
 #include <cstdio>
 #include <cstdlib>

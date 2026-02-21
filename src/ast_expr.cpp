@@ -1,6 +1,6 @@
-#include "include/ast.h"
-#include "include/codegen_utils.h"
-#include "include/errorReporter.h"
+#include "ast.h"
+#include "codegen_utils.h"
+#include "errorReporter.h"
 #include <llvm/IR/Type.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Intrinsics.h>
