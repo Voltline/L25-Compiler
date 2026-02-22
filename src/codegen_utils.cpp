@@ -431,12 +431,8 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             break;
         }
         case CleanupKind::ClassPtr: {
-            // GC 模式：仅移除根，让 GC 负责回收
-            ensureGCRuntimeDeclared(ctx);
-            auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
-            llvm::Value* rootAddr = ctx.builder.CreateBitCast(entry.addr, i8PtrPtrTy, "cleanup.gc.root");
-            llvm::FunctionCallee removeRootFn = ctx.module.getFunction("l25_gc_remove_root");
-            ctx.builder.CreateCall(removeRootFn, {rootAddr});
+            // GC 模式：内联弹出根栈（替代 l25_gc_remove_root 函数调用）
+            emitInlineRootPop(ctx);
             break;
         }
         case CleanupKind::Vector:
@@ -463,12 +459,8 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             break;
         }
         case CleanupKind::GCRoot: {
-            // GC 根注销（用于 this 指针 / 类指针参数）
-            ensureGCRuntimeDeclared(ctx);
-            auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
-            llvm::Value* rootAddr = ctx.builder.CreateBitCast(entry.addr, i8PtrPtrTy, "cleanup.gcroot");
-            llvm::FunctionCallee removeRootFn = ctx.module.getFunction("l25_gc_remove_root");
-            ctx.builder.CreateCall(removeRootFn, {rootAddr});
+            // GC 根注销（用于 this 指针 / 类指针参数）：内联弹出根栈
+            emitInlineRootPop(ctx);
             break;
         }
     }
@@ -773,6 +765,58 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_gc_write_barrier",
             llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
     }
+
+    // ===== 根栈全局变量 =====
+    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+    // l25_gc_root_stack: [65536 x i8*]
+    if (!ctx.module.getGlobalVariable("l25_gc_root_stack")) {
+        auto* arrTy = llvm::ArrayType::get(i8PtrTy, 65536);
+        new llvm::GlobalVariable(ctx.module, arrTy, false,
+            llvm::GlobalValue::ExternalLinkage, nullptr, "l25_gc_root_stack");
+    }
+    // l25_gc_root_sp: i32
+    if (!ctx.module.getGlobalVariable("l25_gc_root_sp")) {
+        new llvm::GlobalVariable(ctx.module, i32Ty, false,
+            llvm::GlobalValue::ExternalLinkage, nullptr, "l25_gc_root_sp");
+    }
+}
+
+// ===== 内联根栈 push =====
+void emitInlineRootPush(llvm::Value* allocaAddr, CodeGenContext& ctx)
+{
+    ensureGCRuntimeDeclared(ctx);
+    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    auto* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
+
+    auto* rootStack = ctx.module.getGlobalVariable("l25_gc_root_stack");
+    auto* rootSp    = ctx.module.getGlobalVariable("l25_gc_root_sp");
+
+    // sp = load l25_gc_root_sp
+    llvm::Value* sp = ctx.builder.CreateLoad(i32Ty, rootSp, "gc.sp");
+    // slot = &l25_gc_root_stack[sp]
+    llvm::Value* slot = ctx.builder.CreateInBoundsGEP(
+        llvm::ArrayType::get(i8PtrTy, 65536), rootStack,
+        {llvm::ConstantInt::get(i32Ty, 0), sp}, "gc.slot");
+    // *slot = (i8*) allocaAddr
+    llvm::Value* castedAddr = ctx.builder.CreateBitCast(allocaAddr, i8PtrTy, "gc.root.cast");
+    ctx.builder.CreateStore(castedAddr, slot);
+    // l25_gc_root_sp = sp + 1
+    llvm::Value* newSp = ctx.builder.CreateAdd(sp, llvm::ConstantInt::get(i32Ty, 1), "gc.sp.inc");
+    ctx.builder.CreateStore(newSp, rootSp);
+}
+
+// ===== 内联根栈 pop =====
+void emitInlineRootPop(CodeGenContext& ctx)
+{
+    ensureGCRuntimeDeclared(ctx);
+    auto* i32Ty  = llvm::Type::getInt32Ty(ctx.context);
+    auto* rootSp = ctx.module.getGlobalVariable("l25_gc_root_sp");
+
+    // sp = load l25_gc_root_sp
+    llvm::Value* sp = ctx.builder.CreateLoad(i32Ty, rootSp, "gc.sp");
+    // l25_gc_root_sp = sp - 1
+    llvm::Value* newSp = ctx.builder.CreateSub(sp, llvm::ConstantInt::get(i32Ty, 1), "gc.sp.dec");
+    ctx.builder.CreateStore(newSp, rootSp);
 }
 
 void emitGCScanFunction(CodeGenContext& ctx, const std::string& className)

@@ -70,6 +70,7 @@ static void counting_dtor(void* obj) {
 static void bench_alloc_simple(int n) {
     l25_gc_init();
     // 用一个栈数组做根，防止 GC 回收
+    if (n > L25_ROOT_STACK_MAX) n = L25_ROOT_STACK_MAX;
     void** roots = (void**)calloc(n, sizeof(void*));
 
     BENCH_BEGIN("alloc (simple, no scan)") {
@@ -81,7 +82,7 @@ static void bench_alloc_simple(int n) {
 
     printf("    -> %d objects, each %zu bytes (+ GC header)\n", n, sizeof(SimpleObj));
 
-    for (int i = 0; i < n; i++) l25_gc_remove_root(&roots[i]);
+    for (int i = n - 1; i >= 0; i--) l25_gc_remove_root(&roots[i]);
     free(roots);
     l25_gc_shutdown();
 }
@@ -91,6 +92,7 @@ static void bench_alloc_simple(int n) {
 // ===================================================
 static void bench_alloc_scannable(int n) {
     l25_gc_init();
+    if (n > L25_ROOT_STACK_MAX) n = L25_ROOT_STACK_MAX;
     void** roots = (void**)calloc(n, sizeof(void*));
 
     BENCH_BEGIN("alloc (with scan_fn)") {
@@ -102,7 +104,7 @@ static void bench_alloc_scannable(int n) {
 
     printf("    -> %d objects with scan_fn\n", n);
 
-    for (int i = 0; i < n; i++) l25_gc_remove_root(&roots[i]);
+    for (int i = n - 1; i >= 0; i--) l25_gc_remove_root(&roots[i]);
     free(roots);
     l25_gc_shutdown();
 }
@@ -136,7 +138,7 @@ static void bench_collect_stw(int n_live, int n_garbage) {
 
     printf("    -> %d live, %d garbage, %d dtors called\n", n_live, n_garbage, dtor_count);
 
-    for (int i = 0; i < n_live; i++) l25_gc_remove_root(&live[i]);
+    for (int i = n_live - 1; i >= 0; i--) l25_gc_remove_root(&live[i]);
     free(live);
     l25_gc_shutdown();
 }
@@ -162,7 +164,7 @@ static void bench_incremental_amortized(int n_total) {
 
     printf("    -> %d total allocs, %d live slots\n", n_total, keep);
 
-    for (int i = 0; i < keep; i++) l25_gc_remove_root(&ring[i]);
+    for (int i = keep - 1; i >= 0; i--) l25_gc_remove_root(&ring[i]);
     free(ring);
     l25_gc_shutdown();
 }
@@ -172,6 +174,8 @@ static void bench_incremental_amortized(int n_total) {
 // ===================================================
 static void bench_root_ops(int n) {
     l25_gc_init();
+    // 限制在根栈容量以内
+    if (n > L25_ROOT_STACK_MAX) n = L25_ROOT_STACK_MAX;
     void** slots = (void**)calloc(n, sizeof(void*));
 
     BENCH_BEGIN("root add") {
@@ -180,8 +184,8 @@ static void bench_root_ops(int n) {
         }
     } BENCH_END();
 
-    BENCH_BEGIN("root remove") {
-        for (int i = 0; i < n; i++) {
+    BENCH_BEGIN("root remove (LIFO)") {
+        for (int i = n - 1; i >= 0; i--) {
             l25_gc_remove_root(&slots[i]);
         }
     } BENCH_END();
@@ -238,7 +242,7 @@ static void bench_write_barrier(int n) {
     printf("    -> %d write_barrier calls\n", n);
 
     l25_gc_remove_root((void**)&big_root);
-    for (int i = 0; i < n_objs; i++) l25_gc_remove_root(&objs[i]);
+    for (int i = n_objs - 1; i >= 0; i--) l25_gc_remove_root(&objs[i]);
     free(objs);
     l25_gc_shutdown();
 }

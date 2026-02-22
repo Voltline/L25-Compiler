@@ -126,12 +126,8 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
     if (typeInfo.kind == SymbolKind::String && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::String);
     } else if (typeInfo.kind == SymbolKind::Class && typeInfo.pointerLevel > 0) {
-        // GC 模式：始终注册根（无论是否来自 new）
-        ensureGCRuntimeDeclared(ctx);
-        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
-        auto* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
-        llvm::Value* rootAddr = ctx.builder.CreateBitCast(alloca, i8PtrPtrTy, "gc.root.addr");
-        ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_add_root"), {rootAddr});
+        // GC 模式：内联 push 根栈（替代 l25_gc_add_root 函数调用）
+        emitInlineRootPush(alloca, ctx);
         ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
         symbolInfo->hasCleanup = true;
     } else if (typeInfo.kind == SymbolKind::Vector && typeInfo.pointerLevel == 0) {

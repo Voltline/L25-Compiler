@@ -50,3 +50,9 @@ TypeInfo getContainerValueType(const SymbolInfo* symbol);
 void ensureGCRuntimeDeclared(CodeGenContext& ctx);
 // 为指定类生成 GC 扫描函数 __gc_scan_ClassName
 void emitGCScanFunction(CodeGenContext& ctx, const std::string& className);
+
+// ===== GC 根栈内联操作 =====
+// 将 alloca 地址入栈（替代 l25_gc_add_root 函数调用）
+void emitInlineRootPush(llvm::Value* allocaAddr, CodeGenContext& ctx);
+// 根栈弹出一个条目（替代 l25_gc_remove_root 函数调用）
+void emitInlineRootPop(CodeGenContext& ctx);

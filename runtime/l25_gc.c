@@ -21,105 +21,11 @@ typedef struct GCObject {
     l25_gc_dtor_fn   dtor_fn;    // 析构函数（NULL = 无需析构）
 } GCObject;
 
-// ===== 开放寻址哈希集（存储 void** 根指针）=====
-typedef struct {
-    void**   buckets;
-    size_t   capacity;
-    size_t   count;
-    size_t   tombstones;
-} RootSet;
-
-#define ROOTSET_TOMBSTONE  ((void**)1)
-#define ROOTSET_EMPTY      ((void**)0)
-
-static inline size_t root_hash(void** ptr) {
-    size_t h = (size_t)ptr >> 3;
-    h *= 0x9E3779B97F4A7C15ULL;
-    return h;
-}
-
-static void rootset_init(RootSet* rs) {
-    rs->buckets    = NULL;
-    rs->capacity   = 0;
-    rs->count      = 0;
-    rs->tombstones = 0;
-}
-
-static void rootset_free(RootSet* rs) {
-    free(rs->buckets);
-    rs->buckets    = NULL;
-    rs->capacity   = 0;
-    rs->count      = 0;
-    rs->tombstones = 0;
-}
-
-static void rootset_resize(RootSet* rs, size_t new_cap) {
-    void** old_buckets = rs->buckets;
-    size_t old_cap     = rs->capacity;
-
-    rs->buckets    = (void**)calloc(new_cap, sizeof(void*));
-    rs->capacity   = new_cap;
-    rs->count      = 0;
-    rs->tombstones = 0;
-
-    size_t mask = new_cap - 1;
-    for (size_t i = 0; i < old_cap; i++) {
-        void** entry = (void**)old_buckets[i];
-        if (entry != ROOTSET_EMPTY && entry != ROOTSET_TOMBSTONE) {
-            size_t idx = root_hash(entry) & mask;
-            while (rs->buckets[idx] != NULL) {
-                idx = (idx + 1) & mask;
-            }
-            rs->buckets[idx] = (void*)entry;
-            rs->count++;
-        }
-    }
-    free(old_buckets);
-}
-
-static void rootset_insert(RootSet* rs, void** root) {
-    if (rs->capacity == 0 ||
-        (rs->count + rs->tombstones + 1) * 10 > rs->capacity * 7) {
-        size_t new_cap = rs->capacity == 0 ? 64 : rs->capacity * 2;
-        rootset_resize(rs, new_cap);
-    }
-
-    size_t mask = rs->capacity - 1;
-    size_t idx  = root_hash(root) & mask;
-
-    while (1) {
-        void** entry = (void**)rs->buckets[idx];
-        if (entry == ROOTSET_EMPTY || entry == ROOTSET_TOMBSTONE) {
-            if (entry == ROOTSET_TOMBSTONE) rs->tombstones--;
-            rs->buckets[idx] = (void*)root;
-            rs->count++;
-            return;
-        }
-        if (entry == root) return;
-        idx = (idx + 1) & mask;
-    }
-}
-
-static void rootset_remove(RootSet* rs, void** root) {
-    if (rs->capacity == 0) return;
-    size_t mask = rs->capacity - 1;
-    size_t idx  = root_hash(root) & mask;
-
-    while (1) {
-        void** entry = (void**)rs->buckets[idx];
-        if (entry == ROOTSET_EMPTY) return;
-        if (entry == root) {
-            rs->buckets[idx] = (void*)ROOTSET_TOMBSTONE;
-            rs->count--;
-            rs->tombstones++;
-            if (rs->tombstones > rs->count && rs->capacity > 64) {
-                rootset_resize(rs, rs->capacity);
-            }
-            return;
-        }
-        idx = (idx + 1) & mask;
-    }
-}
+// ===== 全局根栈 =====
+// 编译器内联操作这两个全局变量（无需函数调用）
+// 每个槽存放一个 void**（栈上 alloca 的地址），扫描时解引用取实际指针
+void*   l25_gc_root_stack[L25_ROOT_STACK_MAX];
+int32_t l25_gc_root_sp = 0;
 
 // ===== GC 状态机 =====
 typedef enum {
@@ -132,7 +38,6 @@ typedef enum {
 // ===== GC 全局状态 =====
 typedef struct {
     GCObject*  objects;          // 所有 GC 对象的链表头
-    RootSet    roots;            // 根集哈希表
     size_t     bytes_allocated;  // 已分配字节数
     size_t     next_gc;          // 触发 GC 的字节阈值
     size_t     object_count;     // GC 对象计数
@@ -177,7 +82,6 @@ static void mark_gray(void* ptr) {
 // ===== 初始化 =====
 void l25_gc_init(void) {
     gc.objects        = NULL;
-    rootset_init(&gc.roots);
     gc.bytes_allocated = 0;
     gc.next_gc        = GC_INITIAL_THRESHOLD;
     gc.object_count   = 0;
@@ -185,6 +89,7 @@ void l25_gc_init(void) {
     gc.gray_list      = NULL;
     gc.sweep_cursor   = NULL;
     gc.sweep_prev     = NULL;
+    l25_gc_root_sp    = 0;
 }
 
 // ===== 增量标记：处理 N 个灰色对象 =====
@@ -212,15 +117,12 @@ static void gc_start_cycle(void) {
     }
     gc.gray_list = NULL;
 
-    // 2. 从根出发将直接可达对象标灰
-    RootSet* rs = &gc.roots;
-    for (size_t i = 0; i < rs->capacity; i++) {
-        void** entry = (void**)rs->buckets[i];
-        if (entry != ROOTSET_EMPTY && entry != ROOTSET_TOMBSTONE) {
-            void* ptr = *entry;
-            if (ptr) {
-                shade_gray(get_header(ptr));
-            }
+    // 2. 从根栈出发将直接可达对象标灰
+    for (int32_t i = 0; i < l25_gc_root_sp; i++) {
+        void** slot = (void**)l25_gc_root_stack[i];
+        void* ptr = *slot;
+        if (ptr) {
+            shade_gray(get_header(ptr));
         }
     }
 
@@ -363,8 +265,7 @@ void l25_gc_shutdown(void) {
     gc.objects       = NULL;
     gc.object_count  = 0;
     gc.bytes_allocated = 0;
-
-    rootset_free(&gc.roots);
+    l25_gc_root_sp = 0;
 }
 
 // ===== 分配 GC 管理的对象 =====
@@ -399,14 +300,27 @@ void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) 
     return get_user_ptr(obj);
 }
 
-// ===== 注册根 =====
+// ===== 注册根（兼容接口：push 到根栈） =====
 void l25_gc_add_root(void** root) {
-    rootset_insert(&gc.roots, root);
+    if (l25_gc_root_sp < L25_ROOT_STACK_MAX) {
+        l25_gc_root_stack[l25_gc_root_sp++] = (void*)root;
+    }
 }
 
-// ===== 移除根 =====
+// ===== 移除根（兼容接口：LIFO pop） =====
 void l25_gc_remove_root(void** root) {
-    rootset_remove(&gc.roots, root);
+    // 快速路径：LIFO 顺序，栈顶即为目标
+    if (l25_gc_root_sp > 0 && l25_gc_root_stack[l25_gc_root_sp - 1] == (void*)root) {
+        l25_gc_root_sp--;
+        return;
+    }
+    // 慢速路径：从栈顶向下搜索（极少触发）
+    for (int32_t i = l25_gc_root_sp - 1; i >= 0; i--) {
+        if (l25_gc_root_stack[i] == (void*)root) {
+            l25_gc_root_stack[i] = l25_gc_root_stack[--l25_gc_root_sp];
+            return;
+        }
+    }
 }
 
 // ===== 确定性析构（delete 语句） =====
