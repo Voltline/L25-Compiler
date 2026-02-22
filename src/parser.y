@@ -838,6 +838,18 @@ factor:
         $$->column = @1.first_column;
         delete $2;
     }
+    | NEW INTSIGN LBRACKET expr RBRACKET
+    {
+        $$ = new NewArrayExpr("int", false, std::unique_ptr<Expr>($4));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | NEW FLOATSIGN LBRACKET expr RBRACKET
+    {
+        $$ = new NewArrayExpr("float", true, std::unique_ptr<Expr>($4));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     | factor DOT IDENT
     {
         $$ = new MemberAccessExpr(std::unique_ptr<Expr>($1), std::make_unique<IdentExpr>(*$3));

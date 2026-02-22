@@ -130,6 +130,11 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         emitInlineRootPush(alloca, ctx);
         ctx.registerCleanup(alloca, CleanupKind::ClassPtr, typeInfo.className);
         symbolInfo->hasCleanup = true;
+    } else if (typeInfo.kind == SymbolKind::Pointer && typeInfo.pointerLevel > 0 && typeInfo.className.empty()) {
+        // 基本类型指针（new T[n]）：注册 GC 根 + 清理
+        emitInlineRootPush(alloca, ctx);
+        ctx.registerCleanup(alloca, CleanupKind::GCRoot);
+        symbolInfo->hasCleanup = true;
     } else if (typeInfo.kind == SymbolKind::Vector && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::Vector);
         symbolInfo->hasCleanup = true;
@@ -215,6 +220,13 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
     }
 
     TypeInfo lhsType = targetSymbol ? typeInfoFromSymbol(targetSymbol) : evaluateExprType(name.get());
+
+    // 指针下标赋值：lhsType 应为元素类型而非指针类型
+    if (auto arrayExpr = dynamic_cast<ArraySubscriptExpr*>(name.get())) {
+        if (targetSymbol && targetSymbol->kind == SymbolKind::Pointer && targetSymbol->pointerLevel > 0) {
+            lhsType = evaluateExprType(name.get());
+        }
+    }
 
     // 字符串赋值：释放旧数据 + 深拷贝新值（已拥有的缓冲区跳过深拷贝）
     if (lhsType.kind == SymbolKind::String && lhsType.pointerLevel == 0 && lhsAddr) {
@@ -585,8 +597,45 @@ llvm::Value* DeleteStmt::codeGen(CodeGenContext& ctx) const
     if (!rawTarget) return nullptr;
 
     TypeInfo type = evaluateExprType(target.get());
+
+    // ===== 非类指针（new T[n] 分配的堆数组，GC 管理）=====
+    if (type.kind == SymbolKind::Pointer && type.pointerLevel > 0 && type.className.empty()) {
+        llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        llvm::PointerType* ptrTy = llvm::dyn_cast<llvm::PointerType>(rawTarget->getType());
+        if (!ptrTy) ptrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+
+        llvm::Function* parentFunc = ctx.builder.GetInsertBlock()->getParent();
+        llvm::BasicBlock* deleteBB = llvm::BasicBlock::Create(ctx.context, "delete.arr.body", parentFunc);
+        llvm::BasicBlock* contBB = llvm::BasicBlock::Create(ctx.context, "delete.arr.cont", parentFunc);
+        llvm::Value* isNull = ctx.builder.CreateICmpEQ(
+            ctx.builder.CreateBitCast(rawTarget, i8PtrTy),
+            llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy)));
+        ctx.builder.CreateCondBr(isNull, contBB, deleteBB);
+
+        ctx.builder.SetInsertPoint(deleteBB);
+        // GC 统一管理：使用 l25_gc_free 释放
+        ensureGCRuntimeDeclared(ctx);
+        llvm::Value* castPtr = ctx.builder.CreateBitCast(rawTarget, i8PtrTy);
+        llvm::FunctionCallee gcFreeFn = ctx.module.getFunction("l25_gc_free");
+        ctx.builder.CreateCall(gcFreeFn, {castPtr});
+        ctx.builder.CreateBr(contBB);
+
+        ctx.builder.SetInsertPoint(contBB);
+
+        // 置空源变量
+        if (auto identExpr = dynamic_cast<IdentExpr*>(target.get())) {
+            SymbolInfo* sym = scope->lookup(identExpr->ident);
+            if (sym && sym->addr) {
+                ctx.builder.CreateStore(
+                    llvm::ConstantPointerNull::get(ptrTy), sym->addr);
+            }
+        }
+        return nullptr;
+    }
+
+    // ===== 类指针（GC 管理）=====
     if (type.kind != SymbolKind::Class || type.pointerLevel <= 0) {
-        reportError("delete 目标必须是类指针");
+        reportError("delete 目标必须是指针");
         return nullptr;
     }
 

@@ -19,6 +19,7 @@ struct CtorDecl;
 struct MemberAccessExpr;
 struct MethodCallExpr;
 struct NewExpr;
+struct NewArrayExpr;
 struct Stmt;
 struct StmtList;
 struct DeclareStmt;
@@ -499,6 +500,20 @@ struct NewExpr: public Expr
     std::unique_ptr<ArgList> args; // Nullable
 
     NewExpr(std::unique_ptr<IdentExpr> className, std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// new T[n] 数组堆分配表达式
+struct NewArrayExpr: public Expr
+{
+    std::string elementTypeName; // "int" 或 "float"
+    bool isFloat;
+    std::unique_ptr<Expr> sizeExpr;
+
+    NewArrayExpr(const std::string& elementTypeName, bool isFloat, std::unique_ptr<Expr> sizeExpr);
 
     void print(int indent = 0) const override;
 

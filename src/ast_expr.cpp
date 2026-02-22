@@ -452,6 +452,19 @@ llvm::Value* ArraySubscriptExpr::codeGen(CodeGenContext& ctx) const {
         return ctx.builder.CreateLoad(valLLVMTy, typedPtr, "map.sub.val");
     }
 
+    // ===== 指针下标访问（new T[n] 返回的堆指针）=====
+    if (symbol->pointerLevel > 0 && symbol->kind == SymbolKind::Pointer) {
+        llvm::Type* elemTy = symbol->isFloat
+            ? llvm::Type::getFloatTy(ctx.context)
+            : llvm::Type::getInt32Ty(ctx.context);
+        llvm::Type* ptrTy = llvm::PointerType::get(elemTy, 0);
+        llvm::Value* basePtr = ctx.builder.CreateLoad(ptrTy, symbol->addr, "ptr.load");
+        llvm::Value* idx = subscript[0]->codeGen(ctx);
+        if (!idx) return nullptr;
+        llvm::Value* gep = ctx.builder.CreateGEP(elemTy, basePtr, {idx}, "ptr.elem");
+        return ctx.builder.CreateLoad(elemTy, gep, "ptr.elem.val");
+    }
+
     // ===== 原始数组下标 =====
 
     llvm::Value* arrayAlloca = symbol->addr;
@@ -544,6 +557,18 @@ llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
         llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_get");
         llvm::Value* valPtr = ctx.builder.CreateCall(fn, {containerPtr, keyPtr}, "map.addr.ptr");
         return ctx.builder.CreateBitCast(valPtr, llvm::PointerType::get(valLLVMTy, 0));
+    }
+
+    // ===== 指针下标地址（new T[n] 返回的堆指针）=====
+    if (symbol->pointerLevel > 0 && symbol->kind == SymbolKind::Pointer) {
+        llvm::Type* elemTy = symbol->isFloat
+            ? llvm::Type::getFloatTy(ctx.context)
+            : llvm::Type::getInt32Ty(ctx.context);
+        llvm::Type* ptrTy = llvm::PointerType::get(elemTy, 0);
+        llvm::Value* basePtr = ctx.builder.CreateLoad(ptrTy, symbol->addr, "ptr.addr.load");
+        llvm::Value* idx = subscript[0]->codeGen(ctx);
+        if (!idx) return nullptr;
+        return ctx.builder.CreateGEP(elemTy, basePtr, {idx}, "ptr.addr.elem");
     }
 
     // ===== 原始数组下标地址 =====
@@ -967,6 +992,59 @@ llvm::Value* NewExpr::codeGen(CodeGenContext& ctx) const
             isVolatile
         });
     }
+
+    return typedPtr;
+}
+
+// ===== new T[n] 数组堆分配表达式 =====
+NewArrayExpr::NewArrayExpr(const std::string& elementTypeName, bool isFloat, std::unique_ptr<Expr> sizeExpr)
+    : elementTypeName(elementTypeName), isFloat(isFloat), sizeExpr(std::move(sizeExpr)) {}
+
+void NewArrayExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "NewArray(" << elementTypeName << ")" << std::endl;
+    if (sizeExpr) sizeExpr->print(indent + 2);
+}
+
+llvm::Value* NewArrayExpr::codeGen(CodeGenContext& ctx) const
+{
+    // 计算数组大小
+    llvm::Value* sizeVal = sizeExpr->codeGen(ctx);
+    if (!sizeVal) {
+        reportError("new 数组大小表达式生成失败");
+        return nullptr;
+    }
+
+    // 转换为 i64
+    llvm::Type* i64Ty = llvm::Type::getInt64Ty(ctx.context);
+    if (sizeVal->getType() != i64Ty) {
+        if (sizeVal->getType()->isIntegerTy()) {
+            sizeVal = ctx.builder.CreateZExt(sizeVal, i64Ty, "arr.size.ext");
+        } else if (sizeVal->getType()->isFloatTy()) {
+            sizeVal = ctx.builder.CreateFPToUI(sizeVal, i64Ty, "arr.size.ftoi");
+        }
+    }
+
+    // 元素类型
+    llvm::Type* elemTy = isFloat
+        ? llvm::Type::getFloatTy(ctx.context)
+        : llvm::Type::getInt32Ty(ctx.context);
+    uint64_t elemSize = ctx.module.getDataLayout().getTypeAllocSize(elemTy);
+
+    // GC 分配：l25_gc_alloc(totalSize, NULL, NULL)
+    // 基本类型数组无指针字段（不需要 scan）、无析构函数
+    ensureGCRuntimeDeclared(ctx);
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Value* elemSizeVal = llvm::ConstantInt::get(i64Ty, elemSize);
+    llvm::Value* totalSize = ctx.builder.CreateMul(sizeVal, elemSizeVal, "newarr.totalsize");
+    llvm::Value* nullPtr = llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy));
+
+    llvm::FunctionCallee gcAllocFn = ctx.module.getFunction("l25_gc_alloc");
+    llvm::Value* rawPtr = ctx.builder.CreateCall(gcAllocFn, {totalSize, nullPtr, nullPtr}, "newarr.raw");
+
+    // 转换为目标指针类型
+    llvm::Type* ptrTy = llvm::PointerType::get(elemTy, 0);
+    llvm::Value* typedPtr = ctx.builder.CreateBitCast(rawPtr, ptrTy, "newarr.ptr");
 
     return typedPtr;
 }

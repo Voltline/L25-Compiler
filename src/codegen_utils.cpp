@@ -349,6 +349,9 @@ TypeInfo evaluateExprType(const Expr* expr)
     if (auto newExpr = dynamic_cast<const NewExpr*>(expr)) {
         return TypeInfo{ SymbolKind::Class, {}, 1, false, newExpr->className->ident };
     }
+    if (auto newArrExpr = dynamic_cast<const NewArrayExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::Pointer, {}, 1, newArrExpr->isFloat };
+    }
     if (auto methodCall = dynamic_cast<const MethodCallExpr*>(expr)) {
         TypeInfo targetType = evaluateExprType(methodCall->target.get());
         // 容器方法返回类型

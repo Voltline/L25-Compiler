@@ -1,0 +1,40 @@
+program test_new_array {
+    func sum_array(arr: *int, n: int) {
+        let s: int = 0;
+        let i: int = 0;
+        while (i < n) {
+            s = s + arr[i];
+            i = i + 1;
+        };
+        return s;
+    }
+
+    main {
+        let a: *int = new int[10];
+        let i: int = 0;
+        while (i < 10) {
+            a[i] = i * i;
+            i = i + 1;
+        };
+        output(a[0], a[3], a[9]);
+        output(sum_array(a, 10));
+
+        let b: *float = new float[5];
+        b[0] = 1.5;
+        b[1] = 2.5;
+        b[2] = 3.5;
+        b[3] = 4.5;
+        b[4] = 5.5;
+        output(b[0], b[4]);
+
+        let n: int = 100;
+        let c: *int = new int[n];
+        i = 0;
+        while (i < n) {
+            c[i] = i + 1;
+            i = i + 1;
+        };
+        output(c[0], c[99]);
+        output(sum_array(c, n));
+    }
+}

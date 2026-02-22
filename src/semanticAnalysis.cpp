@@ -466,6 +466,15 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
                 reportError(*subscript, "下标访问与数组维度不匹配：" + subscript->array->ident);
                 return;
             }
+        } else if (arraySymbol->kind == SymbolKind::Pointer && arraySymbol->pointerLevel > 0) {
+            // 指针下标访问（new T[n] 返回的堆指针）
+            if (subscript->subscript.size() != 1) {
+                reportError(*subscript, "指针下标访问只允许一个索引");
+                return;
+            }
+            for (auto& idxExpr: subscript->subscript) {
+                analyzeExpr(*idxExpr);
+            }
         } else {
             reportError(*subscript, "尝试访问非数组/非容器变量的下标：" + arraySymbol->name);
             return;
@@ -599,6 +608,13 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             for (const auto& arg : newExpr->args->args) {
                 analyzeExpr(*arg);
             }
+        }
+    } else if (auto newArrExpr = dynamic_cast<const NewArrayExpr*>(&expr)) {
+        // new T[n] — 验证大小表达式
+        if (newArrExpr->sizeExpr) {
+            analyzeExpr(*newArrExpr->sizeExpr);
+        } else {
+            reportError(*newArrExpr, "new 数组缺少大小表达式");
         }
     } else if (auto strLit = dynamic_cast<const StringLiteralExpr*>(&expr)) {
         // 字符串字面量，无需额外分析
