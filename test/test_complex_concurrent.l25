@@ -1,23 +1,67 @@
 program concurrency_test {
-    func thread_func(ch: channel<int, 10>, id: int) {
-        let times = 10;
-        while (times > 0) {
-            let tmp = ch.recv();
-            output("Thread ", id, " received: ", tmp);
-            times = times - 1;
+    func random(seed) {
+        let res = seed;
+        let a = 1103515245;
+        let c = 12345;
+        let m = 2147483647;
+        let cnt = 0;
+        while (cnt < 10) {
+            res = (a * res + c) % m;
+            if (res < 0) {
+                res = 0 - res;
+            };
+            cnt = cnt + 1;
         };
+        return res;
+    }
+
+    func thread_func(in_ch: channel<int, 100>, out_ch1: channel<int, 100>, out_ch2: channel<int, 100>) {
+        let cnt1 = 0;
+        let cnt2 = 0;
+        // cnt1 计算小于50的数的个数，cnt2 计算大于等于50的数的个数
+        while (1 == 1) {
+            let tmp = in_ch.recv();
+            if (tmp == -1) {
+                break;
+            };
+
+            if (tmp < 50) {
+                cnt1 = cnt1 + 1;
+            } else {
+                cnt2 = cnt2 + 1;
+            };
+        };
+        out_ch1.send(cnt1);
+        out_ch2.send(cnt2);
     }
 
     main {
-        let ch: channel<int, 10>;
+        let ch: channel<int, 100>;
+        let out_ch1: channel<int, 100>;
+        let out_ch2: channel<int, 100>;
+
         for (let i = 0; i < 10; i = i + 1) {
             spawn {
-                thread_func(ch, i);
+                thread_func(ch, out_ch1, out_ch2);
             };
         };
 
-        for (let i = 0; i < 100; i = i + 1) {
-            ch.send(i);
+        spawn {
+            for (let i = 1; i <= 10000; i = i + 1) {
+                ch.send(random(i) % 100);
+            };
+            // 发送结束信号
+            for (let i = 0; i < 10; i = i + 1) {
+                ch.send(-1);
+            };
         };
+
+        let sum1 = 0;
+        let sum2 = 0;
+        for (let i = 0; i < 10; i = i + 1) {
+            sum1 = sum1 + out_ch1.recv();
+            sum2 = sum2 + out_ch2.recv();
+        };
+        output("sum1: ", sum1, " sum2: ", sum2);
     }
 }

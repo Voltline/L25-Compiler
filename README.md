@@ -332,6 +332,64 @@ program for_demo {
 ```
 &emsp; `for (init; condition; step) { body }` is supported. The init clause can be either a `let` declaration or an assignment. The condition is a boolean expression, and the step is an assignment statement.
 
+* 🛑 *Break statement for loops*:
+```L25
+program break_demo {
+    main {
+        let sum: int = 0;
+        let i: int = 0;
+        while (i < 100) {
+            if (i == 10) {
+                break;
+            };
+            sum = sum + i;
+            i = i + 1;
+        };
+        output(sum);       // 45
+
+        let sum2: int = 0;
+        for (let j = 0; j < 100; j = j + 1) {
+            if (j == 5) {
+                break;
+            };
+            sum2 = sum2 + j;
+        };
+        output(sum2);      // 10
+    }
+}
+```
+&emsp; `break;` exits the innermost enclosing `while` or `for` loop. RAII cleanup is emitted before the jump. The compiler rejects `break` outside of loops at semantic-analysis time.
+
+* 🚀 *Goroutine-like Concurrency with `spawn` and `channel<T>`*:
+```L25
+program concurrency {
+    func worker(ch: channel<int, 10>, id: int) {
+        let i = 0;
+        while (i < 5) {
+            ch.send(id * 100 + i);
+            i = i + 1;
+        };
+    }
+
+    main {
+        let ch: channel<int, 10>;
+
+        for (let i = 0; i < 3; i = i + 1) {
+            spawn {
+                worker(ch, i);
+            };
+        };
+
+        let sum: int = 0;
+        for (let i = 0; i < 15; i = i + 1) {
+            sum = sum + ch.recv();
+        };
+        output(sum);
+    }
+}
+```
+&emsp; `spawn { ... }` launches a block on a thread pool (auto-sized to CPU cores, 2–16 workers). Captured variables are copied by value (strings are deep-copied). `channel<T>` (default capacity 1) or `channel<T, N>` (buffered with capacity N) provides type-safe inter-goroutine communication. Channels support `send(val)`, `recv()`, `len()`, and `close()` methods. The thread pool waits for all spawned tasks before main exits. Channels are automatically freed by RAII.
+
 * 🧾 *Procedures without explicit return values*:
 ```L25
 func log_message(msg) {
@@ -554,6 +612,8 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <delete_stmt>
     | <invoke_stmt>
     | <nested_func_stmt>
+    | <spawn_stmt>
+    | "break"
 
 <delete_stmt> =
     "delete" <expr>
@@ -667,6 +727,9 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 <array_subscript_list> =
     <expr> { "," <expr> }
 
+<spawn_stmt> =
+    "spawn" "{" <stmt_list> "}"
+
 <type_info> =
       <base_type>
     | "[" <dim_list> "]" [ <base_type> ]
@@ -675,6 +738,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | "map" "<" <base_type> "," <base_type> ">"
     | "deque" "<" <base_type> ">"
     | "queue" "<" <base_type> ">"
+    | "channel" "<" <base_type> [ "," <number> ] ">"
 
 <base_type> =
     "int" | "float" | "string" | <ident>
@@ -718,6 +782,9 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - The GC scans all pointer-typed fields (including `*int`, `*float`, etc.) for reachability; containers (`vector`/`map`) holding class pointers are **not** scanned by the collector.
 - Strings, vectors, and maps use scope-based RAII cleanup and are not managed by the GC.
 - `delete` immediately frees the target, nullifies the source variable (including `this.field`), and clears any dangling root-stack references to prevent use-after-free during GC scanning.
+- `spawn` blocks capture variables by value; GC-managed objects should not be created inside `spawn` blocks.
+- The thread pool and all spawned tasks are shut down before RAII cleanup to prevent use-after-free.
+- `break` can only be used inside `while` or `for` loops.
 
 
 ## 🛠️ Build Instructions
@@ -790,12 +857,14 @@ L25-Compiler/
 │   ├── logo-light.png
 │   └── logo.png
 ├── runtime
+│   ├── l25_channel.c
 │   ├── l25_deque.c
 │   ├── l25_gc.c
 │   ├── l25_gc.h
 │   ├── l25_map.c
 │   ├── l25_queue.c
 │   ├── l25_runtime.h
+│   ├── l25_thread.c
 │   └── l25_vector.c
 ├── src
 │   ├── ast_class.cpp
@@ -803,6 +872,7 @@ L25-Compiler/
 │   ├── ast_func.cpp
 │   ├── ast_node.cpp
 │   ├── ast_reflect.cpp
+│   ├── ast_spawn.cpp
 │   ├── ast_stmt.cpp
 │   ├── ast_string.cpp
 │   ├── codegen_utils.cpp
@@ -840,6 +910,12 @@ L25-Compiler/
 │   ├── test_reflection.l25
 │   ├── test_runtime_reflect.l25
 │   ├── test_string.l25
+│   ├── test_break.l25
+│   ├── test_channel_capacity.l25
+│   ├── test_complex_concurrent.l25
+│   ├── test_spawn.l25
+│   ├── test_spawn_fib.l25
+│   ├── test_spawn_multi.l25
 │   ├── test_vector.l25
 │   └── test_vector_class.l25
 ├── test.sh
