@@ -35,7 +35,7 @@ for src in "${TESTS[@]}"; do
     fi
 
     # 编译到可执行文件
-    if ! clang-18 "$ll" -o "$bin" -lm 2>&1; then
+    if ! clang-18 "$ll" -o "$bin" -L. -ll25rt -lm 2>&1; then
         echo "  [SKIP] clang 链接失败"
         FAIL=$((FAIL + 1))
         continue
@@ -53,7 +53,10 @@ for src in "${TESTS[@]}"; do
     echo "--- valgrind 摘要 ---"
     echo "$VG_OUTPUT" | grep -E "(definitely|indirectly|possibly|still reachable|LEAK SUMMARY|ERROR SUMMARY|total heap)" || true
 
-    if echo "$VG_OUTPUT" | grep -q "definitely lost: 0 bytes"; then
+    if echo "$VG_OUTPUT" | grep -q "All heap blocks were freed"; then
+        echo "  [PASS] 无内存泄漏"
+        PASS=$((PASS + 1))
+    elif echo "$VG_OUTPUT" | grep -q "definitely lost: 0 bytes"; then
         if echo "$VG_OUTPUT" | grep -q "indirectly lost: 0 bytes"; then
             echo "  [PASS] 无确定性泄漏"
             PASS=$((PASS + 1))
