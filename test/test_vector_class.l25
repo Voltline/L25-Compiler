@@ -71,7 +71,7 @@ program test_vector_class {
         v.push(10);
         v.push(20);
         v.push(30);
-        let end = 1000000000;
+        let end = 10000000;
         let i = 0;
         for (i = 0; i < end; i = i + 1) {
             v.push(i);
@@ -84,6 +84,5 @@ program test_vector_class {
         output(v.pop_back());
         output(v.get(2));
         let a;
-        input(a);
     }
 }

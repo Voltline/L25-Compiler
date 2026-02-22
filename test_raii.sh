@@ -14,6 +14,7 @@ TESTS=(
     "test/test18.l25"
     "test/test20.l25"
     "test/test_string.l25"
+    "test/test_vector_class.l25"
 )
 
 PASS=0
