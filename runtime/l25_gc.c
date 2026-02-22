@@ -323,16 +323,38 @@ void l25_gc_remove_root(void** root) {
     }
 }
 
-// ===== 确定性析构（delete 语句） =====
+// ===== 确定性析构并释放（delete 语句） =====
 void l25_gc_free(void* ptr) {
     if (!ptr) return;
     GCObject* obj = get_header(ptr);
-    if (obj->dead) return;
 
-    if (obj->dtor_fn) {
+    // 调用析构器（如果尚未调用）
+    if (!obj->dead && obj->dtor_fn) {
         obj->dtor_fn(ptr);
     }
     obj->dead = 1;
+
+    // 从 GC 链表中移除
+    GCObject** prev = &gc.objects;
+    for (GCObject* cur = gc.objects; cur; cur = cur->next) {
+        if (cur == obj) {
+            *prev = cur->next;
+            break;
+        }
+        prev = &cur->next;
+    }
+
+    // 如果 sweep 游标正指向此对象，需要推进
+    if (gc.sweep_cursor == obj) {
+        gc.sweep_cursor = obj->next;
+    }
+
+    // 更新统计
+    gc.bytes_allocated -= (sizeof(GCObject) + obj->size);
+    gc.object_count--;
+
+    // 立即释放内存
+    free(obj);
 }
 
 // ===== 写屏障 =====
