@@ -25,6 +25,7 @@ private:
     void analyzeFunc(Func& func);
     void analyzeStmt(Stmt& stmt);
     void analyzeExpr(Expr& expr);
+    void analyzeBoolExpr(BoolExpr& boolExpr);
 
     void declareSymbol(const std::string& name, const SymbolInfo& info);
 

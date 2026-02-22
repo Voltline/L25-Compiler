@@ -287,9 +287,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeExpr(*assign->expr);
         }
     } else if (auto ifStmt = dynamic_cast<IfStmt*>(&stmt)) {
-        const auto& boolExpr = *ifStmt->condition;
-        analyzeExpr(*boolExpr.lhs);
-        analyzeExpr(*boolExpr.rhs);
+        analyzeBoolExpr(*ifStmt->condition);
 
         enterScope();
         ifStmt->ifScope = currentScope;
@@ -308,9 +306,7 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             exitScope();
         }
     } else if (auto whileStmt = dynamic_cast<WhileStmt*>(&stmt)) {
-        const auto& boolExpr = *whileStmt->condition;
-        analyzeExpr(*boolExpr.lhs);
-        analyzeExpr(*boolExpr.rhs);
+        analyzeBoolExpr(*whileStmt->condition);
 
         enterScope();
         whileStmt->loopBodyScope = currentScope;
@@ -702,6 +698,23 @@ Scope* SemanticAnalyzer::findSymbolScope(const std::string& name)
         scopeIter = scopeIter->getParent();
     }
     return nullptr;
+}
+
+void SemanticAnalyzer::analyzeBoolExpr(BoolExpr& boolExpr)
+{
+    boolExpr.scope = currentScope;
+    if (boolExpr.symbol == "&&" || boolExpr.symbol == "||") {
+        // 逻辑二元运算：递归分析两个子布尔表达式
+        if (boolExpr.bool_lhs) analyzeBoolExpr(*boolExpr.bool_lhs);
+        if (boolExpr.bool_rhs) analyzeBoolExpr(*boolExpr.bool_rhs);
+    } else if (boolExpr.symbol == "!") {
+        // 逻辑非：递归分析操作数
+        if (boolExpr.bool_lhs) analyzeBoolExpr(*boolExpr.bool_lhs);
+    } else {
+        // 比较运算：分析左右表达式
+        if (boolExpr.lhs) analyzeExpr(*boolExpr.lhs);
+        if (boolExpr.rhs) analyzeExpr(*boolExpr.rhs);
+    }
 }
 
 void SemanticAnalyzer::reportError(const ASTNode& node, const std::string& msg)

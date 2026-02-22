@@ -87,6 +87,9 @@ ident {letter}({letter}|[0-9])*
 
 {ident}     { updateLocationAndColumn(); yylval.ident = new std::string{ yytext }; return IDENT; }
 
+"&&"        { updateLocationAndColumn(); return AND; }
+"||"        { updateLocationAndColumn(); return OR; }
+"!"         { updateLocationAndColumn(); return NOT; }
 "=="        { updateLocationAndColumn(); return EQ; }
 "!="        { updateLocationAndColumn(); return NEQ; }
 "<="        { updateLocationAndColumn(); return LE; }

@@ -8,20 +8,90 @@
 #include <algorithm>
 
 // ===== Bool表达式节点 =====
+// 比较运算构造函数
 BoolExpr::BoolExpr(std::string symbol, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs)
     : symbol(symbol)
     , lhs(std::move(lhs))
     , rhs(std::move(rhs)) {}
 
+// 逻辑二元运算构造函数 (&&, ||)
+BoolExpr::BoolExpr(std::string symbol, std::unique_ptr<BoolExpr> bool_lhs, std::unique_ptr<BoolExpr> bool_rhs)
+    : symbol(symbol)
+    , bool_lhs(std::move(bool_lhs))
+    , bool_rhs(std::move(bool_rhs)) {}
+
+// 逻辑一元运算构造函数 (!)
+BoolExpr::BoolExpr(std::string symbol, std::unique_ptr<BoolExpr> operand)
+    : symbol(symbol)
+    , bool_lhs(std::move(operand)) {}
+
 void BoolExpr::print(int indent) const 
 {
     std::cout << std::string(indent, ' ') << "Bool(" << symbol << ")" << std::endl;
-    lhs->print(indent + 2);
-    rhs->print(indent + 2);
+    if (lhs) lhs->print(indent + 2);
+    if (rhs) rhs->print(indent + 2);
+    if (bool_lhs) bool_lhs->print(indent + 2);
+    if (bool_rhs) bool_rhs->print(indent + 2);
 }
 
 llvm::Value* BoolExpr::codeGen(CodeGenContext& ctx) const
 {
+    // ===== 逻辑非 (!) =====
+    if (symbol == "!") {
+        llvm::Value* operandVal = bool_lhs->codeGen(ctx);
+        if (!operandVal) { reportError("! 操作数生成失败"); return nullptr; }
+        return ctx.builder.CreateNot(operandVal, "lnot");
+    }
+
+    // ===== 逻辑与 (&&) — 短路求值 =====
+    if (symbol == "&&") {
+        llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+        llvm::BasicBlock* rhsBB = llvm::BasicBlock::Create(ctx.context, "and.rhs", func);
+        llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(ctx.context, "and.merge", func);
+
+        llvm::Value* lhsVal = bool_lhs->codeGen(ctx);
+        if (!lhsVal) { reportError("&& 左操作数生成失败"); return nullptr; }
+        llvm::BasicBlock* lhsBB = ctx.builder.GetInsertBlock();
+        ctx.builder.CreateCondBr(lhsVal, rhsBB, mergeBB);
+
+        ctx.builder.SetInsertPoint(rhsBB);
+        llvm::Value* rhsVal = bool_rhs->codeGen(ctx);
+        if (!rhsVal) { reportError("&& 右操作数生成失败"); return nullptr; }
+        llvm::BasicBlock* rhsDoneBB = ctx.builder.GetInsertBlock();
+        ctx.builder.CreateBr(mergeBB);
+
+        ctx.builder.SetInsertPoint(mergeBB);
+        llvm::PHINode* phi = ctx.builder.CreatePHI(llvm::Type::getInt1Ty(ctx.context), 2, "and.result");
+        phi->addIncoming(llvm::ConstantInt::getFalse(ctx.context), lhsBB);
+        phi->addIncoming(rhsVal, rhsDoneBB);
+        return phi;
+    }
+
+    // ===== 逻辑或 (||) — 短路求值 =====
+    if (symbol == "||") {
+        llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+        llvm::BasicBlock* rhsBB = llvm::BasicBlock::Create(ctx.context, "or.rhs", func);
+        llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(ctx.context, "or.merge", func);
+
+        llvm::Value* lhsVal = bool_lhs->codeGen(ctx);
+        if (!lhsVal) { reportError("|| 左操作数生成失败"); return nullptr; }
+        llvm::BasicBlock* lhsBB = ctx.builder.GetInsertBlock();
+        ctx.builder.CreateCondBr(lhsVal, mergeBB, rhsBB);
+
+        ctx.builder.SetInsertPoint(rhsBB);
+        llvm::Value* rhsVal = bool_rhs->codeGen(ctx);
+        if (!rhsVal) { reportError("|| 右操作数生成失败"); return nullptr; }
+        llvm::BasicBlock* rhsDoneBB = ctx.builder.GetInsertBlock();
+        ctx.builder.CreateBr(mergeBB);
+
+        ctx.builder.SetInsertPoint(mergeBB);
+        llvm::PHINode* phi = ctx.builder.CreatePHI(llvm::Type::getInt1Ty(ctx.context), 2, "or.result");
+        phi->addIncoming(llvm::ConstantInt::getTrue(ctx.context), lhsBB);
+        phi->addIncoming(rhsVal, rhsDoneBB);
+        return phi;
+    }
+
+    // ===== 比较运算（原有逻辑）=====
     llvm::Value* lhsVal = lhs->codeGen(ctx);
     llvm::Value* rhsVal = rhs->codeGen(ctx);
 

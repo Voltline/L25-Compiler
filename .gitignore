@@ -45,3 +45,5 @@ lexer.cpp
 output
 .DS_Store
 l25cc
+test_vector_class
+test_pointer

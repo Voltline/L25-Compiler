@@ -79,7 +79,8 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
             sizeVal,
             isVolatile
         });
-    } else if (valueType->isPointerTy() && !expr) {
+    } else if (valueType->isPointerTy()) {
+        // 指针类型无条件初始化为 null（确保 GC 根栈 push 前 slot 已有效）
         ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(valueType)), alloca);
     }
 

@@ -1,0 +1,91 @@
+program test_vector_class {
+    class Vector {
+        let data: *int;
+        let size: int;
+        let capacity: int;
+        Vector() {
+            this.size = 0;
+            this.capacity = 0;
+            this.data = nil;
+        }
+
+        func push(x: int) {
+            if (this.size == this.capacity) {
+                let new_capacity = 0;
+                if (this.capacity == 0) {
+                    new_capacity = 16;
+                    output("触发扩容, 新容量: ", new_capacity);
+                } else {
+                    new_capacity = this.capacity * 2;
+                    output("触发扩容, 新容量: ", new_capacity);
+                };
+
+                let new_data: *int = new int[new_capacity];
+                let old_data: *int = this.data;
+                let i: int = 0;
+                while (i < this.size) {
+                    new_data[i] = old_data[i];
+                    i = i + 1;
+                };
+
+                if (this.data != nil) {
+                    delete this.data;
+                };
+
+                this.data = new_data;
+                this.capacity = new_capacity;
+            };
+            let d: *int = this.data;
+            d[this.size] = x;
+            this.size = this.size + 1;
+        }
+
+        func pop_back() -> int {
+            let result: int = 0 - 1;
+            if (this.size > 0) {
+                this.size = this.size - 1;
+                let d: *int = this.data;
+                result = d[this.size];
+            };
+            return result;
+        }
+
+        func get(i: int) -> int {
+            let result: int = 0 - 1;
+            if (i >= 0 && i < this.size) {
+                let d: *int = this.data;
+                result = d[i];
+            };
+            return result;
+        }
+
+        func set(i: int, x: int) {
+            if (i >= 0 && i < this.size) {
+                let d: *int = this.data;
+                d[i] = x;
+            };
+        }
+    }
+
+    main {
+        let v: *Vector = new Vector();
+        v.push(10);
+        v.push(20);
+        v.push(30);
+        let end = 1000000000;
+        let i = 0;
+        while (i < end) {
+            v.push(i);
+            i = i + 1;
+        };
+        output(v.get(0));
+        output(v.get(1));
+        output(v.get(2));
+        v.set(1, 99);
+        output(v.get(1));
+        output(v.pop_back());
+        output(v.get(2));
+        let a;
+        input(a);
+    }
+}

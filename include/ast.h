@@ -372,11 +372,20 @@ struct Expr: public ASTNode {};
 // Bool表达式节点
 struct BoolExpr: public ASTNode
 {
-    std::string symbol;
+    std::string symbol;  // 比较: "==","!=","<","<=",">",">="  逻辑: "&&","||","!"
+    // 比较运算时使用
     std::unique_ptr<Expr> lhs;
     std::unique_ptr<Expr> rhs;
+    // 逻辑运算时使用（&&, ||, !）
+    std::unique_ptr<BoolExpr> bool_lhs;
+    std::unique_ptr<BoolExpr> bool_rhs;
 
+    // 比较运算构造函数
     BoolExpr(std::string symbol, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs);
+    // 逻辑二元运算构造函数 (&&, ||)
+    BoolExpr(std::string symbol, std::unique_ptr<BoolExpr> bool_lhs, std::unique_ptr<BoolExpr> bool_rhs);
+    // 逻辑一元运算构造函数 (!)
+    BoolExpr(std::string symbol, std::unique_ptr<BoolExpr> operand);
 
     void print(int indent = 0) const override;
 

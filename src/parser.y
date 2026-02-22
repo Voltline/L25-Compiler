@@ -123,7 +123,11 @@ extern Program* rootProgram;
 %token VECTOR MAP
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
+%token AND OR NOT
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET COLON SEMICOLON COMMA
+%left OR
+%left AND
+%right NOT
 %left PLUS MINUS
 %left STAR DIVIDE
 %left DOT
@@ -690,6 +694,34 @@ bool_expr:
         };
         $$->lineno = @2.first_line;
         $$->column = @2.first_column;
+    }
+    | bool_expr AND bool_expr
+    {
+        $$ = new BoolExpr{
+            "&&", std::unique_ptr<BoolExpr>($1), std::unique_ptr<BoolExpr>($3)
+        };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+    }
+    | bool_expr OR bool_expr
+    {
+        $$ = new BoolExpr{
+            "||", std::unique_ptr<BoolExpr>($1), std::unique_ptr<BoolExpr>($3)
+        };
+        $$->lineno = @2.first_line;
+        $$->column = @2.first_column;
+    }
+    | NOT bool_expr
+    {
+        $$ = new BoolExpr{
+            "!", std::unique_ptr<BoolExpr>($2)
+        };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | LPAREN bool_expr RPAREN
+    {
+        $$ = $2;
     }
     ;
 

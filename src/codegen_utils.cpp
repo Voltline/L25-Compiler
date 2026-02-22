@@ -827,10 +827,10 @@ void emitGCScanFunction(CodeGenContext& ctx, const std::string& className)
     auto layoutIt = classFieldLayouts.find(className);
     if (layoutIt == classFieldLayouts.end()) return;
 
-    // 检查此类是否有需要扫描的类指针字段
+    // 检查此类是否有需要扫描的指针字段（类指针或基本类型指针）
     bool hasPointerFields = false;
     for (const auto& [fname, ftype] : layoutIt->second) {
-        if (ftype.kind == SymbolKind::Class && ftype.pointerLevel > 0) {
+        if (ftype.pointerLevel > 0) {
             hasPointerFields = true;
             break;
         }
@@ -872,12 +872,13 @@ void emitGCScanFunction(CodeGenContext& ctx, const std::string& className)
 
     for (size_t i = 0; i < layoutIt->second.size(); i++) {
         const auto& [fname, ftype] = layoutIt->second[i];
-        if (ftype.kind == SymbolKind::Class && ftype.pointerLevel > 0) {
+        if (ftype.pointerLevel > 0) {
             // 获取字段指针
             llvm::Value* fieldPtr = ctx.builder.CreateStructGEP(
                 structTy, typedPtr, static_cast<unsigned>(i), "field." + fname);
-            // 加载字段值（类指针）
-            llvm::Type* fieldValTy = typeInfoToLLVMType(ftype, ctx.context, true);
+            // 加载字段值（指针类型）
+            llvm::Type* fieldValTy = llvm::PointerType::get(
+                llvm::Type::getInt8Ty(ctx.context), 0);
             llvm::Value* fieldVal = ctx.builder.CreateLoad(fieldValTy, fieldPtr, "load." + fname);
             // 检查非空
             llvm::BasicBlock* markBB = llvm::BasicBlock::Create(

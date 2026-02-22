@@ -1,0 +1,83 @@
+program test_logical {
+    main {
+        // 基本 && 测试
+        let a = 5;
+        let b = 10;
+        if (a > 0 && b > 0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // && 短路：左为假不执行右
+        if (a < 0 && b > 0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // 基本 || 测试
+        if (a < 0 || b > 0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // || 短路：左为真不执行右
+        if (a > 0 || b < 0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // 两边都假
+        if (a < 0 || b < 0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // ! 取反
+        if (!(a < 0)) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        if (!(a > 0)) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // 复合：(&& 与 || 混合)
+        let c = 0;
+        if ((a > 0 && b > 0) || c > 0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        if (a > 0 && (b < 0 || c == 0)) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // 嵌套 !
+        if (!(a < 0 || b < 0)) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // while 中使用 &&
+        let i = 0;
+        let sum = 0;
+        while (i < 100 && sum < 50) {
+            sum = sum + i;
+            i = i + 1;
+        };
+        output(sum);
+    }
+}
