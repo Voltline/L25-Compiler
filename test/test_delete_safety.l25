@@ -1,0 +1,22 @@
+program TestDeleteSafety {
+    class Data {
+        let val: int;
+        Data(v: int) { this.val = v; }
+        ~Data() {}
+    }
+
+    main {
+        // 两个变量指向同一对象
+        let a: *Data = new Data(777);
+        let b: *Data = a;
+        output(a.val);
+        output(b.val);
+
+        // delete a：调用析构、置空 a，但内存不释放
+        // b 仍然持有引用，内存保持有效
+        delete a;
+
+        // b 仍可访问（GC 保持内存有效）
+        output(b.val);
+    }
+}

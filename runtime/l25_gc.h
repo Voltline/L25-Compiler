@@ -35,8 +35,9 @@ void l25_gc_remove_root(void** root);
 // 手动触发垃圾回收（标记-清除）
 void l25_gc_collect(void);
 
-// 显式释放一个 GC 管理的对象（用于 delete 语句的确定性销毁）
-// 调用析构函数 → 从 GC 链表中移除 → 释放内存
+// 确定性析构（用于 delete 语句）
+// 调用析构函数并标记对象为"已析构"，但不释放内存。
+// 实际内存释放由 GC sweep 阶段统一处理，避免悬挂指针。
 void l25_gc_free(void* ptr);
 
 #ifdef __cplusplus
