@@ -401,6 +401,86 @@ llvm::Value* WhileStmt::codeGen(CodeGenContext& ctx) const
     return nullptr;
 }
 
+// ===== For循环语句节点 =====
+ForStmt::ForStmt(std::unique_ptr<Stmt> init, std::unique_ptr<BoolExpr> condition,
+                 std::unique_ptr<Stmt> step, std::unique_ptr<StmtList> loop_body)
+    : init(std::move(init))
+    , condition(std::move(condition))
+    , step(std::move(step))
+    , loop_body(std::move(loop_body)) {}
+
+void ForStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "for" << std::endl;
+    if (init) init->print(indent + 2);
+    condition->print(indent + 2);
+    if (step) step->print(indent + 2);
+    loop_body->print(indent + 2);
+}
+
+llvm::Value* ForStmt::codeGen(CodeGenContext& ctx) const
+{
+    llvm::Function* function = ctx.builder.GetInsertBlock()->getParent();
+
+    // 创建基本块
+    llvm::BasicBlock* condBlock = llvm::BasicBlock::Create(ctx.context, "for.cond", function);
+    llvm::BasicBlock* bodyBlock = llvm::BasicBlock::Create(ctx.context, "for.body", function);
+    llvm::BasicBlock* stepBlock = llvm::BasicBlock::Create(ctx.context, "for.step", function);
+    llvm::BasicBlock* afterBlock = llvm::BasicBlock::Create(ctx.context, "for.after", function);
+
+    // 执行初始化语句
+    if (init) {
+        init->codeGen(ctx);
+    }
+
+    // 跳转到 condBlock
+    ctx.builder.CreateBr(condBlock);
+
+    // condBlock: 评估循环条件
+    ctx.builder.SetInsertPoint(condBlock);
+    ctx.currentBlock = condBlock;
+
+    llvm::Value* condValue = condition->codeGen(ctx);
+    if (!condValue) return nullptr;
+
+    if (!condValue->getType()->isIntegerTy(1)) {
+        condValue = ctx.builder.CreateICmpNE(condValue, llvm::ConstantInt::get(condValue->getType(), 0), "forcond");
+    }
+
+    ctx.builder.CreateCondBr(condValue, bodyBlock, afterBlock);
+
+    // bodyBlock: 循环体
+    ctx.builder.SetInsertPoint(bodyBlock);
+    ctx.currentBlock = bodyBlock;
+
+    ctx.pushCleanupScope();
+    loop_body->codeGen(ctx);
+
+    if (!ctx.currentBlock->getTerminator()) {
+        ctx.builder.SetInsertPoint(ctx.currentBlock);
+        emitScopeCleanup(ctx);
+        ctx.builder.CreateBr(stepBlock);
+    } else {
+        ctx.popCleanupScope();
+    }
+
+    // stepBlock: 步进语句
+    ctx.builder.SetInsertPoint(stepBlock);
+    ctx.currentBlock = stepBlock;
+
+    if (step) {
+        step->codeGen(ctx);
+    }
+
+    ctx.builder.CreateBr(condBlock);
+
+    // afterBlock
+    ctx.builder.SetInsertPoint(afterBlock);
+    ctx.currentBlock = afterBlock;
+
+    return nullptr;
+}
+
 // ===== 输入语句节点 =====
 InputStmt::InputStmt(std::vector<std::unique_ptr<Expr>> idents)
     : idents(std::move(idents)) {}

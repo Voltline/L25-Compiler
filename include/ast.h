@@ -26,6 +26,7 @@ struct DeclareStmt;
 struct AssignStmt;
 struct IfStmt;
 struct WhileStmt;
+struct ForStmt;
 struct FuncCallStmt;
 struct InputStmt;
 struct OutputStmt;
@@ -299,6 +300,23 @@ struct WhileStmt: public Stmt
 
     WhileStmt(std::unique_ptr<BoolExpr> condition, std::unique_ptr<StmtList> loop_body);
     
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// For循环语句节点
+struct ForStmt: public Stmt
+{
+    std::unique_ptr<Stmt> init;           // 初始化语句 (declare / assign)
+    std::unique_ptr<BoolExpr> condition;  // 循环条件
+    std::unique_ptr<Stmt> step;           // 步进语句 (assign)
+    std::unique_ptr<StmtList> loop_body;
+    Scope* loopBodyScope;
+
+    ForStmt(std::unique_ptr<Stmt> init, std::unique_ptr<BoolExpr> condition,
+            std::unique_ptr<Stmt> step, std::unique_ptr<StmtList> loop_body);
+
     void print(int indent = 0) const override;
 
     llvm::Value* codeGen(CodeGenContext& ctx) const override;

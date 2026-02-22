@@ -314,6 +314,23 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeStmt(*stmt);
         }
         exitScope();
+    } else if (auto forStmt = dynamic_cast<ForStmt*>(&stmt)) {
+        enterScope();
+        forStmt->loopBodyScope = currentScope;
+        // 分析初始化语句（可能包含 let 声明）
+        if (forStmt->init) {
+            analyzeStmt(*forStmt->init);
+        }
+        analyzeBoolExpr(*forStmt->condition);
+        // 分析步进语句
+        if (forStmt->step) {
+            analyzeStmt(*forStmt->step);
+        }
+        // 分析循环体
+        for (const auto& s : forStmt->loop_body->stmts) {
+            analyzeStmt(*s);
+        }
+        exitScope();
     } else if (auto funcCallStmt = dynamic_cast<const FuncCallStmt*>(&stmt)) {
         if (!checkSymbolExists(funcCallStmt->name->ident)) {
             reportError(*funcCallStmt, "函数未声明：" + funcCallStmt->name->ident);

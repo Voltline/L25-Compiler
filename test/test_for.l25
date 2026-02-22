@@ -1,0 +1,59 @@
+program test_for {
+    // 测试1: 基本for循环 - 输出0到4
+    func sum_1_to_n(n: int) -> int {
+        let s: int = 0;
+        for (let i: int = 0; i < n; i = i + 1) {
+            s = s + i;
+        };
+        return s;
+    }
+
+    // 测试2: for循环嵌套
+    func multiply(a: int, b: int) -> int {
+        let result: int = 0;
+        for (let i: int = 0; i < b; i = i + 1) {
+            result = result + a;
+        };
+        return result;
+    }
+
+    // 测试3: 用assign_stmt做初始化
+    func count_down(start: int) -> int {
+        let i: int;
+        let count: int = 0;
+        for (i = start; i > 0; i = i - 1) {
+            count = count + 1;
+        };
+        return count;
+    }
+
+    main {
+        // 基本for循环: 0+1+2+...+9 = 45
+        let s1 = sum_1_to_n(10);
+        output(s1);
+
+        // 嵌套调用: 7*8 = 56
+        let m = multiply(7, 8);
+        output(m);
+
+        // assign初始化: count_down(5) = 5
+        let c = count_down(5);
+        output(c);
+
+        // 直接在main中使用for
+        let total: int = 0;
+        for (let j: int = 1; j <= 100; j = j + 1) {
+            total = total + j;
+        };
+        output(total);
+
+        // for循环嵌套
+        let sum2: int = 0;
+        for (let x: int = 0; x < 3; x = x + 1) {
+            for (let y: int = 0; y < 4; y = y + 1) {
+                sum2 = sum2 + 1;
+            };
+        };
+        output(sum2);
+    }
+}
