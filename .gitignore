@@ -49,3 +49,4 @@ test_vector_class
 test_pointer
 test_spawn_bin
 test_spawn_multi_bin
+test_complex

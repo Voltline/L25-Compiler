@@ -31,6 +31,7 @@ struct FuncCallStmt;
 struct InputStmt;
 struct OutputStmt;
 struct SpawnStmt;
+struct BreakStmt;
 struct Expr;
 struct BoolExpr;
 struct NumberExpr;
@@ -91,6 +92,9 @@ struct CodeGenContext
             cleanupStack.back().push_back({addr, kind, className});
         }
     }
+
+    // break 目标栈：循环 push 对应的 afterBlock，break 跳转到栈顶
+    std::vector<llvm::BasicBlock*> breakTargets;
 
     // 构造函数简化传参
     CodeGenContext(llvm::LLVMContext& ctx,
@@ -385,6 +389,14 @@ struct DeleteStmt: public Stmt
 
     void print(int indent = 0) const override;
 
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// break 语句
+struct BreakStmt: public Stmt
+{
+    BreakStmt() = default;
+    void print(int indent = 0) const override;
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 

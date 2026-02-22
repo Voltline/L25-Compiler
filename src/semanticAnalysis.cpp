@@ -310,9 +310,11 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
 
         enterScope();
         whileStmt->loopBodyScope = currentScope;
+        loopDepth++;
         for (const auto& stmt: whileStmt->loop_body->stmts) {
             analyzeStmt(*stmt);
         }
+        loopDepth--;
         exitScope();
     } else if (auto forStmt = dynamic_cast<ForStmt*>(&stmt)) {
         enterScope();
@@ -327,9 +329,11 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             analyzeStmt(*forStmt->step);
         }
         // 分析循环体
+        loopDepth++;
         for (const auto& s : forStmt->loop_body->stmts) {
             analyzeStmt(*s);
         }
+        loopDepth--;
         exitScope();
     } else if (auto funcCallStmt = dynamic_cast<const FuncCallStmt*>(&stmt)) {
         if (!checkSymbolExists(funcCallStmt->name->ident)) {
@@ -391,6 +395,10 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             }
         }
         currentScope = savedScope;
+    } else if (dynamic_cast<BreakStmt*>(&stmt)) {
+        if (loopDepth <= 0) {
+            reportError(stmt, "break 语句只能在循环内使用");
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 #include "ast.h"
 struct ClassMemberAggregate;
 struct SpawnStmt;
+struct BreakStmt;
 }
 
 %{
@@ -120,7 +121,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN
 %token ARROW
@@ -426,6 +427,12 @@ input_arg_list:
 
 stmt:
     declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | input_stmt | output_stmt
+    | BREAK
+    {
+        $$ = new BreakStmt();
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     | func_call
     { // func_call是FuncCallStmt类型，到Stmt要隐式转换一次
         $$ = $1;

@@ -12,6 +12,7 @@ public:
     std::unique_ptr<Scope> rootScope = nullptr;
 private:
     Scope* currentScope = nullptr;
+    int loopDepth = 0; // 循环嵌套深度（用于 break 校验）
     std::vector<Func*> funcStack; // 用于记录当前函数链以发现捕获
     std::unordered_map<std::string, ClassDecl*> classDecls; // 已注册的类声明
     ClassDecl* currentClass = nullptr;

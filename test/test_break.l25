@@ -1,0 +1,23 @@
+program testbreak {
+    main {
+        let sum: int = 0;
+        let i: int = 0;
+        while (i < 100) {
+            if (i == 10) {
+                break;
+            };
+            sum = sum + i;
+            i = i + 1;
+        };
+        output(sum);
+
+        let sum2: int = 0;
+        for (let j = 0; j < 100; j = j + 1) {
+            if (j == 5) {
+                break;
+            };
+            sum2 = sum2 + j;
+        };
+        output(sum2);
+    }
+}

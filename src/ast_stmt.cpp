@@ -430,6 +430,7 @@ llvm::Value* WhileStmt::codeGen(CodeGenContext& ctx) const
     ctx.builder.SetInsertPoint(bodyBlock);
     ctx.currentBlock = bodyBlock;
 
+    ctx.breakTargets.push_back(afterBlock);
     ctx.pushCleanupScope();
     loop_body->codeGen(ctx);
 
@@ -440,6 +441,7 @@ llvm::Value* WhileStmt::codeGen(CodeGenContext& ctx) const
     } else {
         ctx.popCleanupScope();
     }
+    ctx.breakTargets.pop_back();
 
     // 必须插入 afterBlock，不然后续的代码可能跳不到这里
     ctx.builder.SetInsertPoint(afterBlock);
@@ -500,6 +502,7 @@ llvm::Value* ForStmt::codeGen(CodeGenContext& ctx) const
     ctx.builder.SetInsertPoint(bodyBlock);
     ctx.currentBlock = bodyBlock;
 
+    ctx.breakTargets.push_back(afterBlock);
     ctx.pushCleanupScope();
     loop_body->codeGen(ctx);
 
@@ -510,6 +513,7 @@ llvm::Value* ForStmt::codeGen(CodeGenContext& ctx) const
     } else {
         ctx.popCleanupScope();
     }
+    ctx.breakTargets.pop_back();
 
     // stepBlock: 步进语句
     ctx.builder.SetInsertPoint(stepBlock);
@@ -525,6 +529,30 @@ llvm::Value* ForStmt::codeGen(CodeGenContext& ctx) const
     ctx.builder.SetInsertPoint(afterBlock);
     ctx.currentBlock = afterBlock;
 
+    return nullptr;
+}
+
+// ===== Break语句节点 =====
+void BreakStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "break" << std::endl;
+}
+
+llvm::Value* BreakStmt::codeGen(CodeGenContext& ctx) const
+{
+    if (ctx.breakTargets.empty()) {
+        reportError("break 语句只能在循环内使用");
+        return nullptr;
+    }
+    llvm::BasicBlock* target = ctx.breakTargets.back();
+    // 清理当前循环体作用域的 RAII 资源
+    emitScopeCleanup(ctx);
+    ctx.builder.CreateBr(target);
+    // 创建一个不可达的基本块，防止后续语句插入到已终结的块
+    llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* deadBlock = llvm::BasicBlock::Create(ctx.context, "break.dead", func);
+    ctx.builder.SetInsertPoint(deadBlock);
+    ctx.currentBlock = deadBlock;
     return nullptr;
 }
 
