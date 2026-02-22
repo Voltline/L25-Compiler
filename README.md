@@ -262,7 +262,48 @@ program gc_demo {
     }
 }
 ```
-&emsp; Class instances allocated with `new` are managed by a built-in mark-and-sweep garbage collector. Local class-pointer variables, `this`, and class-pointer function parameters are automatically registered as GC roots. The collector runs when the allocation threshold is exceeded. `delete` remains available for deterministic cleanup. Strings, vectors, and maps continue to use RAII and are not GC-managed.
+&emsp; All heap objects allocated with `new` (class instances and `new T[n]` arrays) are managed by a **tri-color incremental mark-and-sweep** garbage collector with **Dijkstra-style write barriers**. Local pointer variables, `this`, and pointer function parameters are automatically registered as GC roots. The collector runs incrementally (a few mark/sweep steps per allocation) and adapts its pace to memory pressure&mdash;when usage exceeds 75% of the threshold it accelerates, and when it exceeds 100% it forces a full collection. `delete` remains available for deterministic cleanup: it immediately invokes the destructor, removes the object from the GC list, nullifies dangling root-stack references, and frees the memory. Strings, vectors, and maps continue to use RAII and are not GC-managed.
+
+* 🔀 *Logical operators with short-circuit evaluation*:
+```L25
+program logic {
+    main {
+        let a = 1;
+        let b = 0;
+        if (a > 0 && b == 0) {
+            output(1);     // 1 (short-circuits: skips RHS if LHS is false)
+        };
+        if (a > 0 || b > 0) {
+            output(1);     // 1 (short-circuits: skips RHS if LHS is true)
+        };
+        if (!(a == 0)) {
+            output(1);     // 1
+        };
+    }
+}
+```
+&emsp; `&&` (logical AND), `||` (logical OR) and `!` (logical NOT) are supported in boolean expressions. `&&` and `||` use short-circuit evaluation&mdash;the right-hand side is only evaluated when necessary. Precedence: `!` > `&&` > `||`. Parenthesized sub-expressions are allowed.
+
+* 🔄 *For loops*:
+```L25
+program for_demo {
+    main {
+        // with declaration init
+        let sum: int = 0;
+        for (let i: int = 0; i <= 100; i = i + 1) {
+            sum = sum + i;
+        };
+        output(sum);       // 5050
+
+        // with assignment init
+        let j: int;
+        for (j = 10; j > 0; j = j - 1) {
+            output(j);
+        };
+    }
+}
+```
+&emsp; `for (init; condition; step) { body }` is supported. The init clause can be either a `let` declaration or an assignment. The condition is a boolean expression, and the step is an assignment statement.
 
 * 🧾 *Procedures without explicit return values*:
 ```L25
@@ -479,6 +520,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <assign_stmt>
     | <if_stmt>
     | <while_stmt>
+    | <for_stmt>
     | <input_stmt>
     | <output_stmt>
     | <func_call>
@@ -544,8 +586,17 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     ( <ident> | <array_subscript_expr> )
     { "," ( <ident> | <array_subscript_expr> ) }
 
+<for_stmt> =
+    "for" "(" ( <declare_stmt> | <assign_stmt> ) ";" <bool_expr> ";" <assign_stmt> ")" "{"
+        <stmt_list>
+    "}"
+
 <bool_expr> =
-    <expr> ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) <expr>
+      <expr> ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) <expr>
+    | <bool_expr> "&&" <bool_expr>
+    | <bool_expr> "||" <bool_expr>
+    | "!" <bool_expr>
+    | "(" <bool_expr> ")"
 
 <expr> =
     [ "+" | "-" ] <term> { ( "+" | "-" ) <term> }
@@ -634,8 +685,9 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - Chained pointer member access is supported: `node.next.value` correctly loads intermediate pointers.
 - Class definitions are only allowed at the top level of a program.
 - Nested class definitions are not supported.
-- The GC only scans class-pointer fields for reachability; containers (`vector`/`map`) holding class pointers are **not** scanned by the collector.
+- The GC scans all pointer-typed fields (including `*int`, `*float`, etc.) for reachability; containers (`vector`/`map`) holding class pointers are **not** scanned by the collector.
 - Strings, vectors, and maps use scope-based RAII cleanup and are not managed by the GC.
+- `delete` immediately frees the target, nullifies the source variable (including `this.field`), and clears any dangling root-stack references to prevent use-after-free during GC scanning.
 
 
 ## 🛠️ Build Instructions
@@ -693,59 +745,71 @@ L25-Compiler/
 ├── LICENSE
 ├── Makefile
 ├── README.md
-├── ast.cpp
-├── errorReporter.cpp
+├── bench
+│   └── bench_gc.c
 ├── include
-│   ├── ast.h
-│   ├── errorReporter.h
-│   ├── semanticAnalysis.h
-│   └── symbol.h
-├── lexer.l
-├── main.cpp
+│   ├── ast.h
+│   ├── codegen_utils.h
+│   ├── errorReporter.h
+│   ├── semanticAnalysis.h
+│   └── symbol.h
 ├── others
-│   ├── banner.png
-│   ├── extension-effect.png
-│   ├── extension.png
-│   ├── logo-light.png
-│   └── logo.png
-├── parser.y
-├── semanticAnalysis.cpp
-├── symbol.cpp
+│   ├── banner.png
+│   ├── extension-effect.png
+│   ├── extension.png
+│   ├── logo-light.png
+│   └── logo.png
+├── runtime
+│   ├── l25_gc.c
+│   ├── l25_gc.h
+│   ├── l25_map.c
+│   ├── l25_runtime.h
+│   └── l25_vector.c
+├── src
+│   ├── ast_class.cpp
+│   ├── ast_expr.cpp
+│   ├── ast_func.cpp
+│   ├── ast_node.cpp
+│   ├── ast_reflect.cpp
+│   ├── ast_stmt.cpp
+│   ├── ast_string.cpp
+│   ├── codegen_utils.cpp
+│   ├── errorReporter.cpp
+│   ├── lexer.l
+│   ├── main.cpp
+│   ├── parser.y
+│   ├── semanticAnalysis.cpp
+│   └── symbol.cpp
 ├── test
-│   ├── error_class_unknown_member.l25
-│   ├── error_missing_semicolon.l25
-│   ├── error_undeclared_variable.l25
-│   ├── error_wrong_call_arity.l25
-│   ├── test1.l25
-│   ├── test10.l25
-│   ├── test11.l25
-│   ├── test12.l25
-│   ├── test13.l25
-│   ├── test14.l25
-│   ├── test15.l25
-│   ├── test16.l25
-│   ├── test17.l25
-│   ├── test18.l25
-│   ├── test19.l25
-│   ├── test2.l25
-│   ├── test20.l25
-│   ├── test3.l25
-│   ├── test4.l25
-│   ├── test5.l25
-│   ├── test6.l25
-│   ├── test7.l25
-│   ├── test8.l25
-│   ├── test9.l25
-│   ├── test_class_basic.l25
-│   ├── test_class_method_call.l25
-│   ├── test_closure.l25
-│   ├── test_float.l25
+│   ├── error_class_unknown_member.l25
+│   ├── error_missing_semicolon.l25
+│   ├── error_undeclared_variable.l25
+│   ├── error_wrong_call_arity.l25
+│   ├── test1.l25 .. test20.l25
+│   ├── test_class_basic.l25
+│   ├── test_class_method_call.l25
+│   ├── test_closure.l25
+│   ├── test_delete_gc.l25
+│   ├── test_delete_safety.l25
+│   ├── test_float.l25
+│   ├── test_for.l25
+│   ├── test_gc.l25
 │   ├── test_invoke.l25
-│   ├── test_pointer.l25
+│   ├── test_logical.l25
+│   ├── test_map.l25
+│   ├── test_new_array.l25
+│   ├── test_pointer.l25
+│   ├── test_raii_class.l25
+│   ├── test_raii_func.l25
+│   ├── test_raii_linked_list.l25
+│   ├── test_raii_string.l25
 │   ├── test_reflection.l25
 │   ├── test_runtime_reflect.l25
-│   └── test_string.l25
-└── test.sh
+│   ├── test_string.l25
+│   ├── test_vector.l25
+│   └── test_vector_class.l25
+├── test.sh
+└── test_raii.sh
 ```
 
 ## 🧠 About LLVM  
