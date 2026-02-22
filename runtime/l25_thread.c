@@ -77,10 +77,9 @@ void l25_thread_pool_init(void) {
 
     pool = (ThreadPool*)calloc(1, sizeof(ThreadPool));
 
-    /* 线程数 = CPU 核心数（至少 2，最多 16） */
+    /* 线程数 = CPU 核心数（至少 2，最多 NCPU） */
     int ncpu = (int)sysconf(_SC_NPROCESSORS_ONLN);
     if (ncpu < 2) ncpu = 2;
-    if (ncpu > 16) ncpu = 16;
     pool->num_threads = ncpu;
 
     pool->threads = (pthread_t*)calloc(pool->num_threads, sizeof(pthread_t));

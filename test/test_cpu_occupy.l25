@@ -1,0 +1,12 @@
+program testcpu {
+    main {
+        for (let i = 0; i < 20; i = i + 1) {
+            spawn {
+                let tmp = 0;
+                while (1 == 1) {
+                    tmp = tmp + 1;
+                };
+            };
+        };
+    }
+}
