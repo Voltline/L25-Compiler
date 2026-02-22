@@ -768,6 +768,11 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_gc_free",
             llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
     }
+    // l25_gc_write_barrier(i8*) — 写屏障
+    if (!ctx.module.getFunction("l25_gc_write_barrier")) {
+        ctx.module.getOrInsertFunction("l25_gc_write_barrier",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
 }
 
 void emitGCScanFunction(CodeGenContext& ctx, const std::string& className)

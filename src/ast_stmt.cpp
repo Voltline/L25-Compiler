@@ -235,6 +235,18 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
     if (lhsType.kind == SymbolKind::Class && lhsType.pointerLevel > 0 && lhsAddr && !lhsType.className.empty()) {
         // GC 模式：无需释放旧值，GC 负责回收不可达对象
         // 也无需移动语义——多个变量可安全指向同一对象
+
+        // 写屏障：当向堆对象的字段中写入指针时，需通知 GC
+        // 仅对 MemberAccessExpr（obj.field = x）和 DereferenceExpr（*p = x）触发
+        // 局部变量赋值不需要，因为局部变量已作为根被追踪
+        bool needWriteBarrier = dynamic_cast<MemberAccessExpr*>(name.get()) != nullptr
+                             || dynamic_cast<DereferenceExpr*>(name.get()) != nullptr;
+        if (needWriteBarrier) {
+            ensureGCRuntimeDeclared(ctx);
+            auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+            llvm::Value* rhsCast = ctx.builder.CreateBitCast(rhs, i8PtrTy, "gc.wb.ptr");
+            ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_write_barrier"), {rhsCast});
+        }
     }
 
     llvm::Type* targetType = typeInfoToLLVMValueType(lhsType, ctx.context);
