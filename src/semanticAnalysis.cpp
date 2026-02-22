@@ -378,6 +378,19 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         if (deleteStmt->target) {
             analyzeExpr(*deleteStmt->target);
         }
+    } else if (auto spawnStmt = dynamic_cast<SpawnStmt*>(&stmt)) {
+        spawnStmt->scope = currentScope;
+        // spawn 块内部语句使用子作用域
+        Scope* childScope = currentScope->createChild();
+        spawnStmt->bodyScope = childScope;
+        Scope* savedScope = currentScope;
+        currentScope = childScope;
+        if (spawnStmt->body) {
+            for (auto& s : spawnStmt->body->stmts) {
+                analyzeStmt(*s);
+            }
+        }
+        currentScope = savedScope;
     }
 }
 
@@ -595,6 +608,23 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             else if (mname == "len" && argCount == 0) { /* ok */ }
             else {
                 reportError(*methodCall, "queue 不存在方法或参数数量不匹配：" + mname);
+                return;
+            }
+            if (methodCall->args) {
+                for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+            }
+            return;
+        }
+        if (targetType.kind == SymbolKind::Channel) {
+            const std::string& mname = methodCall->method->ident;
+            size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+            // 合法方法: send(1), recv(0), len(0), close(0)
+            if (mname == "send" && argCount == 1) { /* ok */ }
+            else if (mname == "recv" && argCount == 0) { /* ok */ }
+            else if (mname == "len" && argCount == 0) { /* ok */ }
+            else if (mname == "close" && argCount == 0) { /* ok */ }
+            else {
+                reportError(*methodCall, "channel 不存在方法或参数数量不匹配：" + mname);
                 return;
             }
             if (methodCall->args) {

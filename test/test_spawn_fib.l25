@@ -1,0 +1,33 @@
+program spawnfan {
+    func fib(n: int) -> int {
+        let result: int = 0;
+        if (n <= 1) {
+            result = n;
+        } else {
+            result = fib(n - 1) + fib(n - 2);
+        };
+        return result;
+    }
+
+    main {
+        let ch: channel<int>;
+
+        spawn {
+            ch.send(fib(10));
+        };
+
+        spawn {
+            ch.send(fib(12));
+        };
+
+        spawn {
+            ch.send(fib(8));
+        };
+
+        let a: int = ch.recv();
+        let b: int = ch.recv();
+        let c: int = ch.recv();
+
+        output(a + b + c);
+    }
+}

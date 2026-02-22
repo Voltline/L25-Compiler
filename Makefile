@@ -46,7 +46,7 @@ test: all
 	./test.sh
 
 # AST 拆分后的目标文件
-AST_OBJS = codegen_utils.o ast_node.o ast_class.o ast_func.o ast_stmt.o ast_expr.o ast_string.o ast_reflect.o
+AST_OBJS = codegen_utils.o ast_node.o ast_class.o ast_func.o ast_stmt.o ast_expr.o ast_string.o ast_reflect.o ast_spawn.o
 AST_HEADERS = $(INCDIR)/ast.h $(INCDIR)/codegen_utils.h
 
 # 链接
@@ -92,6 +92,9 @@ ast_string.o: $(SRCDIR)/ast_string.cpp $(AST_HEADERS)
 ast_reflect.o: $(SRCDIR)/ast_reflect.cpp $(AST_HEADERS)
 	$(CXX) $(CXXFLAGS) -c $(SRCDIR)/ast_reflect.cpp
 
+ast_spawn.o: $(SRCDIR)/ast_spawn.cpp $(AST_HEADERS)
+	$(CXX) $(CXXFLAGS) -c $(SRCDIR)/ast_spawn.cpp
+
 # 其他模块编译
 symbol.o: $(SRCDIR)/symbol.cpp $(INCDIR)/symbol.h
 	$(CXX) $(CXXFLAGS) -c $(SRCDIR)/symbol.cpp
@@ -124,8 +127,14 @@ l25_deque.o: $(RUNTIME_DIR)/l25_deque.c $(RUNTIME_DIR)/l25_runtime.h
 l25_queue.o: $(RUNTIME_DIR)/l25_queue.c $(RUNTIME_DIR)/l25_runtime.h
 	$(CC) -O2 -c $(RUNTIME_DIR)/l25_queue.c -I$(RUNTIME_DIR) -o l25_queue.o
 
-libl25rt.a: l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o
-	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o
+l25_thread.o: $(RUNTIME_DIR)/l25_thread.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_thread.c -I$(RUNTIME_DIR) -o l25_thread.o -pthread
+
+l25_channel.o: $(RUNTIME_DIR)/l25_channel.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_channel.c -I$(RUNTIME_DIR) -o l25_channel.o -pthread
+
+libl25rt.a: l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o l25_thread.o l25_channel.o
+	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o l25_thread.o l25_channel.o
 
 clean:
 	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output libl25rt.a bench_gc

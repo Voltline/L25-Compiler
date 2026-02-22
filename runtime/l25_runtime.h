@@ -58,6 +58,21 @@ void*   l25_queue_front(void* que);
 void*   l25_queue_back(void* que);
 int64_t l25_queue_len(void* que);
 
+/* ===== Channel API ===== */
+
+void*   l25_channel_create(int64_t elem_size, int64_t capacity);
+void    l25_channel_destroy(void* ch);
+void    l25_channel_send(void* ch, const void* elem);
+void    l25_channel_recv(void* ch, void* out_elem);
+int64_t l25_channel_len(void* ch);
+void    l25_channel_close(void* ch);
+
+/* ===== Thread Pool API ===== */
+
+void    l25_thread_pool_init(void);
+void    l25_thread_spawn(void (*fn)(void*), void* arg);
+void    l25_thread_pool_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

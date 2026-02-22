@@ -99,7 +99,8 @@ llvm::Type* typeInfoToLLVMType(const TypeInfo& typeInfo, llvm::LLVMContext& ctx,
     } else if (typeInfo.kind == SymbolKind::String) {
         baseType = getL25StringType(ctx);
     } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map
-            || typeInfo.kind == SymbolKind::Deque  || typeInfo.kind == SymbolKind::Queue) {
+            || typeInfo.kind == SymbolKind::Deque  || typeInfo.kind == SymbolKind::Queue
+            || typeInfo.kind == SymbolKind::Channel) {
         // 容器类型在 IR 层是不透明指针 (i8*)
         baseType = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0);
     }
@@ -135,7 +136,8 @@ llvm::Type* typeInfoToLLVMValueType(const TypeInfo& typeInfo, llvm::LLVMContext&
     } else if (typeInfo.kind == SymbolKind::String) {
         baseType = getL25StringType(ctx);
     } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map
-            || typeInfo.kind == SymbolKind::Deque  || typeInfo.kind == SymbolKind::Queue) {
+            || typeInfo.kind == SymbolKind::Deque  || typeInfo.kind == SymbolKind::Queue
+            || typeInfo.kind == SymbolKind::Channel) {
         baseType = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0);
     } else {
         baseType = scalarType;
@@ -407,6 +409,18 @@ TypeInfo evaluateExprType(const Expr* expr)
             if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
             return TypeInfo{ SymbolKind::Int, {}, 0 };
         }
+        if (targetType.kind == SymbolKind::Channel) {
+            const std::string& mname = methodCall->method->ident;
+            SymbolInfo* sym = nullptr;
+            if (auto ident = dynamic_cast<const IdentExpr*>(methodCall->target.get())) {
+                if (ident->scope) sym = ident->scope->lookup(ident->ident);
+            }
+            if (mname == "recv") {
+                return sym ? getContainerElemType(sym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            }
+            if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            return TypeInfo{ SymbolKind::Int, {}, 0 };
+        }
         std::string className = targetType.className;
         if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
             className = targetType.className;
@@ -467,7 +481,8 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
         case CleanupKind::Vector:
         case CleanupKind::Map:
         case CleanupKind::Deque:
-        case CleanupKind::Queue: {
+        case CleanupKind::Queue:
+        case CleanupKind::Channel: {
             // 加载容器指针，非空则调用对应的 destroy
             llvm::Value* ptr = ctx.builder.CreateLoad(i8PtrTy, entry.addr, "cleanup.container");
 
@@ -484,7 +499,8 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
                 case CleanupKind::Vector: destroyFnName = "l25_vector_destroy"; break;
                 case CleanupKind::Map:    destroyFnName = "l25_map_destroy"; break;
                 case CleanupKind::Deque:  destroyFnName = "l25_deque_destroy"; break;
-                case CleanupKind::Queue:  destroyFnName = "l25_queue_destroy"; break;
+                case CleanupKind::Queue:   destroyFnName = "l25_queue_destroy"; break;
+                case CleanupKind::Channel: destroyFnName = "l25_channel_destroy"; break;
                 default: break;
             }
             llvm::FunctionCallee destroyFn = ctx.module.getOrInsertFunction(destroyFnName,
@@ -783,6 +799,32 @@ void ensureContainerRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_queue_len",
             llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
     }
+
+    // Channel API
+    if (!ctx.module.getFunction("l25_channel_create")) {
+        ctx.module.getOrInsertFunction("l25_channel_create",
+            llvm::FunctionType::get(i8PtrTy, {i64Ty, i64Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_channel_destroy")) {
+        ctx.module.getOrInsertFunction("l25_channel_destroy",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_channel_send")) {
+        ctx.module.getOrInsertFunction("l25_channel_send",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_channel_recv")) {
+        ctx.module.getOrInsertFunction("l25_channel_recv",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_channel_len")) {
+        ctx.module.getOrInsertFunction("l25_channel_len",
+            llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_channel_close")) {
+        ctx.module.getOrInsertFunction("l25_channel_close",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
 }
 
 uint64_t getTypeAllocSize(const TypeInfo& typeInfo, CodeGenContext& ctx)
@@ -805,7 +847,8 @@ TypeInfo getContainerElemType(const SymbolInfo* symbol)
 {
     if (!symbol) return TypeInfo{ SymbolKind::Int, {}, 0, false };
     if ((symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Deque
-         || symbol->kind == SymbolKind::Queue) && !symbol->typeParams.empty()) {
+         || symbol->kind == SymbolKind::Queue || symbol->kind == SymbolKind::Channel)
+        && !symbol->typeParams.empty()) {
         return symbol->typeParams[0];
     }
     return TypeInfo{ SymbolKind::Int, {}, 0, false };

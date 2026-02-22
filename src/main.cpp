@@ -184,7 +184,7 @@ int main(int argc, const char* argv[])
         if (!runtimeLib.empty()) {
             cmd += " " + runtimeLib;
         }
-        cmd += " -o " + outputFile + " -lm";
+        cmd += " -o " + outputFile + " -lm -lpthread";
         int ret = system(cmd.c_str());
         if (ret != 0) {
             std::cerr << "链接失败: llvm-as 或 clang 报错\n";

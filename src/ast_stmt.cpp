@@ -132,6 +132,17 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
                                     {llvm::Type::getInt64Ty(ctx.context)}, false));
         llvm::Value* quePtr = ctx.builder.CreateCall(createFn, {elemSizeVal}, "queue.create");
         ctx.builder.CreateStore(quePtr, alloca);
+    } else if (typeInfo.kind == SymbolKind::Channel && typeInfo.pointerLevel == 0) {
+        ensureContainerRuntimeDeclared(ctx);
+        TypeInfo elemType = typeInfo.typeParams.empty() ? TypeInfo{ SymbolKind::Int, {}, 0 } : typeInfo.typeParams[0];
+        uint64_t elemSize = getTypeAllocSize(elemType, ctx);
+        llvm::Value* elemSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), elemSize);
+        llvm::Value* capVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), 1);
+        llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_channel_create",
+            llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+                                    {llvm::Type::getInt64Ty(ctx.context), llvm::Type::getInt64Ty(ctx.context)}, false));
+        llvm::Value* chPtr = ctx.builder.CreateCall(createFn, {elemSizeVal, capVal}, "channel.create");
+        ctx.builder.CreateStore(chPtr, alloca);
     }
 
     if (!alloca) {
@@ -167,6 +178,9 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         symbolInfo->hasCleanup = true;
     } else if (typeInfo.kind == SymbolKind::Queue && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::Queue);
+        symbolInfo->hasCleanup = true;
+    } else if (typeInfo.kind == SymbolKind::Channel && typeInfo.pointerLevel == 0) {
+        ctx.registerCleanup(alloca, CleanupKind::Channel);
         symbolInfo->hasCleanup = true;
     }
 

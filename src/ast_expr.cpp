@@ -849,7 +849,8 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
 
     // ===== 容器方法调用分发 =====
     if (baseType.kind == SymbolKind::Vector || baseType.kind == SymbolKind::Map
-        || baseType.kind == SymbolKind::Deque || baseType.kind == SymbolKind::Queue) {
+        || baseType.kind == SymbolKind::Deque || baseType.kind == SymbolKind::Queue
+        || baseType.kind == SymbolKind::Channel) {
         ensureContainerRuntimeDeclared(ctx);
         // 获取容器指针 (i8*)
         llvm::Value* containerPtr = target->codeGen(ctx);
@@ -1063,6 +1064,34 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
                 llvm::FunctionCallee fn = ctx.module.getFunction("l25_queue_len");
                 llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "que.len");
                 return ctx.builder.CreateTrunc(len64, i32Ty, "que.len.i32");
+            }
+        } else if (baseType.kind == SymbolKind::Channel) {
+            TypeInfo elemType = containerSym ? getContainerElemType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+            if (mname == "send") {
+                llvm::Value* elemVal = args->args[0]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "ch.send.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_channel_send");
+                ctx.builder.CreateCall(fn, {containerPtr, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "recv") {
+                llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "ch.recv.out");
+                llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_channel_recv");
+                ctx.builder.CreateCall(fn, {containerPtr, outCast});
+                return ctx.builder.CreateLoad(elemLLVMTy, out, "ch.recv.val");
+            } else if (mname == "len") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_channel_len");
+                llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "ch.len");
+                return ctx.builder.CreateTrunc(len64, i32Ty, "ch.len.i32");
+            } else if (mname == "close") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_channel_close");
+                ctx.builder.CreateCall(fn, {containerPtr});
+                return llvm::ConstantInt::get(i32Ty, 0);
             }
         }
         reportError("未知的容器方法：" + mname);
@@ -1312,8 +1341,9 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
     } else if (symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Map
-            || symbol->kind == SymbolKind::Deque  || symbol->kind == SymbolKind::Queue) {
-        // 容器是不透明指针 (i8*)，直接 load
+            || symbol->kind == SymbolKind::Deque  || symbol->kind == SymbolKind::Queue
+            || symbol->kind == SymbolKind::Channel) {
+        // 容器/channel 是不透明指针 (i8*)，直接 load
         llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
         return ctx.builder.CreateLoad(i8PtrTy, symbol->addr, ident);
     }

@@ -1,0 +1,23 @@
+program spawnmulti {
+    main {
+        let ch: channel<int>;
+        let n: int = 5;
+
+        let i: int = 0;
+        for (i = 0; i < n; i = i + 1) {
+            let val: int = i;
+            spawn {
+                let result: int = val * val;
+                ch.send(result);
+            };
+        };
+
+        let sum: int = 0;
+        for (i = 0; i < n; i = i + 1) {
+            let v: int = ch.recv();
+            sum = sum + v;
+        };
+
+        output(sum);
+    }
+}

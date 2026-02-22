@@ -30,6 +30,7 @@ struct ForStmt;
 struct FuncCallStmt;
 struct InputStmt;
 struct OutputStmt;
+struct SpawnStmt;
 struct Expr;
 struct BoolExpr;
 struct NumberExpr;
@@ -61,6 +62,7 @@ enum class CleanupKind {
     Map,         // l25_map_destroy
     Deque,       // l25_deque_destroy
     Queue,       // l25_queue_destroy
+    Channel,     // l25_channel_destroy
     GCRoot,      // GC 根注销（this 指针 / 函数参数）
 };
 
@@ -380,6 +382,19 @@ struct DeleteStmt: public Stmt
     std::unique_ptr<Expr> target;
 
     explicit DeleteStmt(std::unique_ptr<Expr> target);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// spawn 语句（goroutine-like 并发块）
+struct SpawnStmt: public Stmt
+{
+    std::unique_ptr<StmtList> body;
+    Scope* bodyScope = nullptr;
+
+    explicit SpawnStmt(std::unique_ptr<StmtList> body);
 
     void print(int indent = 0) const override;
 

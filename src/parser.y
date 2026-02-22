@@ -5,6 +5,7 @@
 %code requires {
 #include "ast.h"
 struct ClassMemberAggregate;
+struct SpawnStmt;
 }
 
 %{
@@ -121,7 +122,7 @@ extern Program* rootProgram;
 
 %token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
-%token VECTOR MAP DEQUE QUEUE
+%token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token AND OR NOT
@@ -428,6 +429,12 @@ stmt:
     | func_call
     { // func_call是FuncCallStmt类型，到Stmt要隐式转换一次
         $$ = $1;
+    }
+    | SPAWN LBRACE stmt_list RBRACE
+    {
+        $$ = new SpawnStmt(std::unique_ptr<StmtList>($3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
     }
     | nested_func_stmt
     {
@@ -1101,6 +1108,12 @@ base_type:
     | QUEUE LT type_info GT
     {
         $$ = new TypeInfo{ SymbolKind::Queue, {}, 0, false };
+        $$->typeParams.push_back(*$3);
+        delete $3;
+    }
+    | CHANNEL LT type_info GT
+    {
+        $$ = new TypeInfo{ SymbolKind::Channel, {}, 0, false };
         $$->typeParams.push_back(*$3);
         delete $3;
     }

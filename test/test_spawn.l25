@@ -1,0 +1,14 @@
+program spawntest {
+    main {
+        let ch: channel<int>;
+        let x: int = 10;
+
+        spawn {
+            let result: int = x + 32;
+            ch.send(result);
+        };
+
+        let val: int = ch.recv();
+        output(val);
+    }
+}

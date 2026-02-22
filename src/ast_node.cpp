@@ -92,10 +92,25 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
     // GC 初始化
     ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_init"), {});
 
+    // 线程池初始化
+    {
+        auto* voidTy = llvm::Type::getVoidTy(ctx.context);
+        if (!ctx.module.getFunction("l25_thread_pool_init"))
+            ctx.module.getOrInsertFunction("l25_thread_pool_init",
+                llvm::FunctionType::get(voidTy, {}, false));
+        if (!ctx.module.getFunction("l25_thread_pool_shutdown"))
+            ctx.module.getOrInsertFunction("l25_thread_pool_shutdown",
+                llvm::FunctionType::get(voidTy, {}, false));
+        ctx.builder.CreateCall(ctx.module.getFunction("l25_thread_pool_init"), {});
+    }
+
     // 生成main_body的IR
     ctx.pushCleanupScope();
     main_body->codeGen(ctx);
     emitScopeCleanup(ctx);
+
+    // 线程池关闭（等待所有 spawn 完成）
+    ctx.builder.CreateCall(ctx.module.getFunction("l25_thread_pool_shutdown"), {});
 
     // GC 关闭（运行最终回收）
     ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_shutdown"), {});

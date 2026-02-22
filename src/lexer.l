@@ -60,6 +60,8 @@ ident {letter}({letter}|[0-9])*
 "map"       { updateLocationAndColumn(); return MAP; }
 "deque"     { updateLocationAndColumn(); return DEQUE; }
 "queue"     { updateLocationAndColumn(); return QUEUE; }
+"channel"   { updateLocationAndColumn(); return CHANNEL; }
+"spawn"     { updateLocationAndColumn(); return SPAWN; }
 
 {floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }
