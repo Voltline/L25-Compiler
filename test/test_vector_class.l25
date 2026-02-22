@@ -86,6 +86,5 @@ program test_vector_class {
         output(v.pop_back());
         output(v.get(2));
         let a;
-        input(a);
     }
 }

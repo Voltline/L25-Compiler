@@ -270,8 +270,20 @@ void l25_gc_shutdown(void) {
 
 // ===== 分配 GC 管理的对象 =====
 void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) {
-    // 增量推进 GC
-    gc_step(GC_MARK_STEPS_PER_ALLOC);
+    // 自适应步进：根据内存压力动态调整推进量
+    size_t steps = GC_MARK_STEPS_PER_ALLOC;
+    if (gc.next_gc > 0) {
+        // 当内存使用超过阈值的 75% 时加速推进
+        size_t threshold_75 = gc.next_gc / 4 * 3;
+        if (gc.bytes_allocated >= threshold_75) {
+            steps = GC_MARK_STEPS_PER_ALLOC * 8;
+        }
+        // 当内存使用超过阈值时，强制完成当前 GC 周期
+        if (gc.bytes_allocated >= gc.next_gc && gc.phase != GC_PHASE_IDLE) {
+            l25_gc_collect();
+        }
+    }
+    gc_step(steps);
 
     GCObject* obj = (GCObject*)malloc(sizeof(GCObject) + size);
     if (!obj) return NULL;
@@ -347,6 +359,28 @@ void l25_gc_free(void* ptr) {
     // 如果 sweep 游标正指向此对象，需要推进
     if (gc.sweep_cursor == obj) {
         gc.sweep_cursor = obj->next;
+    }
+
+    // 从灰色队列中移除（如果对象正在标记周期中）
+    if (obj->color == GC_GRAY) {
+        if (gc.gray_list == obj) {
+            gc.gray_list = obj->gray_next;
+        } else {
+            for (GCObject* g = gc.gray_list; g; g = g->gray_next) {
+                if (g->gray_next == obj) {
+                    g->gray_next = obj->gray_next;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 扫描根栈：将所有指向此对象的 slot 置 null，避免悬挂指针被 GC 追踪
+    for (int32_t i = 0; i < l25_gc_root_sp; i++) {
+        void** slot = (void**)l25_gc_root_stack[i];
+        if (*slot == ptr) {
+            *slot = NULL;
+        }
     }
 
     // 更新统计

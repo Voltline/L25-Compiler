@@ -703,12 +703,18 @@ llvm::Value* DeleteStmt::codeGen(CodeGenContext& ctx) const
 
         ctx.builder.SetInsertPoint(contBB);
 
-        // 置空源变量
+        // 置空源变量（支持 IdentExpr 和 MemberAccessExpr）
         if (auto identExpr = dynamic_cast<IdentExpr*>(target.get())) {
             SymbolInfo* sym = scope->lookup(identExpr->ident);
             if (sym && sym->addr) {
                 ctx.builder.CreateStore(
                     llvm::ConstantPointerNull::get(ptrTy), sym->addr);
+            }
+        } else if (auto memberExpr = dynamic_cast<MemberAccessExpr*>(target.get())) {
+            llvm::Value* fieldPtr = memberExpr->getPointer(ctx);
+            if (fieldPtr) {
+                ctx.builder.CreateStore(
+                    llvm::ConstantPointerNull::get(ptrTy), fieldPtr);
             }
         }
         return nullptr;
@@ -749,12 +755,18 @@ llvm::Value* DeleteStmt::codeGen(CodeGenContext& ctx) const
 
     ctx.builder.SetInsertPoint(contBB);
 
-    // 将源变量置空（避免悬挂指针）
+    // 将源变量置空（避免悬挂指针，支持 IdentExpr 和 MemberAccessExpr）
     if (auto identExpr = dynamic_cast<IdentExpr*>(target.get())) {
         SymbolInfo* sym = scope->lookup(identExpr->ident);
         if (sym && sym->addr) {
             ctx.builder.CreateStore(
                 llvm::ConstantPointerNull::get(classPtrTy), sym->addr);
+        }
+    } else if (auto memberExpr = dynamic_cast<MemberAccessExpr*>(target.get())) {
+        llvm::Value* fieldPtr = memberExpr->getPointer(ctx);
+        if (fieldPtr) {
+            ctx.builder.CreateStore(
+                llvm::ConstantPointerNull::get(classPtrTy), fieldPtr);
         }
     }
 

@@ -1,0 +1,59 @@
+program test_delete_gc {
+    class Buffer {
+        let data: *int;
+        let size: int;
+        let capacity: int;
+
+        Buffer() {
+            this.size = 0;
+            this.capacity = 16;
+            this.data = new int[16];
+        }
+
+        func grow() {
+            let new_cap = this.capacity * 2;
+            let new_data: *int = new int[new_cap];
+            let old: *int = this.data;
+            let i: int = 0;
+            while (i < this.size) {
+                new_data[i] = old[i];
+                i = i + 1;
+            };
+            delete this.data;
+            this.data = new_data;
+            this.capacity = new_cap;
+        }
+
+        func push(x: int) {
+            if (this.size == this.capacity) {
+                this.grow();
+            };
+            let d: *int = this.data;
+            d[this.size] = x;
+            this.size = this.size + 1;
+        }
+
+        func get(i: int) -> int {
+            let result: int = 0;
+            if (i >= 0 && i < this.size) {
+                let d: *int = this.data;
+                result = d[i];
+            };
+            return result;
+        }
+    }
+
+    main {
+        let buf: *Buffer = new Buffer();
+
+        // 大量 push 触发多次 grow，验证 delete + GC 交互安全
+        for (let i: int = 0; i < 100000; i = i + 1) {
+            buf.push(i);
+        };
+
+        // 验证数据完整性
+        output(buf.get(0));
+        output(buf.get(99999));
+        output(buf.size);
+    }
+}
