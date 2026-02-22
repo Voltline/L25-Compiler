@@ -107,10 +107,12 @@ llvm::Value* Program::codeGen(CodeGenContext& ctx) const
     // 生成main_body的IR
     ctx.pushCleanupScope();
     main_body->codeGen(ctx);
-    emitScopeCleanup(ctx);
 
-    // 线程池关闭（等待所有 spawn 完成）
+    // 线程池关闭（等待所有 spawn 完成）—— 必须在 RAII 清理之前，
+    // 否则 channel 等资源会在工作线程仍在使用时被销毁
     ctx.builder.CreateCall(ctx.module.getFunction("l25_thread_pool_shutdown"), {});
+
+    emitScopeCleanup(ctx);
 
     // GC 关闭（运行最终回收）
     ctx.builder.CreateCall(ctx.module.getFunction("l25_gc_shutdown"), {});

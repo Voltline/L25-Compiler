@@ -1,0 +1,23 @@
+program concurrency_test {
+    func thread_func(ch: channel<int, 10>, id: int) {
+        let times = 10;
+        while (times > 0) {
+            let tmp = ch.recv();
+            output("Thread ", id, " received: ", tmp);
+            times = times - 1;
+        };
+    }
+
+    main {
+        let ch: channel<int, 10>;
+        for (let i = 0; i < 10; i = i + 1) {
+            spawn {
+                thread_func(ch, i);
+            };
+        };
+
+        for (let i = 0; i < 100; i = i + 1) {
+            ch.send(i);
+        };
+    }
+}
