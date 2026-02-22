@@ -122,6 +122,15 @@ libl25rt.a: l25_vector.o l25_map.o l25_gc.o
 	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o
 
 clean:
-	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output libl25rt.a
+	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output libl25rt.a bench_gc
 
-.PHONY: all clean debug test
+# ===== GC 基准测试 =====
+BENCHDIR = bench
+
+bench_gc: $(BENCHDIR)/bench_gc.c $(RUNTIME_DIR)/l25_gc.c $(RUNTIME_DIR)/l25_gc.h
+	$(CC) -O2 -o bench_gc $(BENCHDIR)/bench_gc.c $(RUNTIME_DIR)/l25_gc.c -I$(RUNTIME_DIR) -lm
+
+bench: bench_gc
+	./bench_gc
+
+.PHONY: all clean debug test bench
