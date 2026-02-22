@@ -19,13 +19,15 @@ enum class SymbolKind {
     Class,
     Vector,
     Map,
+    Deque,
+    Queue,
     Function,
     Program,
     Invalid
 };
 
 const char* const SymbolName[] {
-    "Int", "Float", "String", "Array", "Pointer", "Class", "Vector", "Map", "Function", "Program", "Invalid"
+    "Int", "Float", "String", "Array", "Pointer", "Class", "Vector", "Map", "Deque", "Queue", "Function", "Program", "Invalid"
 };
 
 struct TypeInfo

@@ -34,6 +34,30 @@ int32_t l25_map_contains(void* map, const void* key);
 void    l25_map_erase(void* map, const void* key);
 int64_t l25_map_len(void* map);
 
+/* ===== Deque API ===== */
+
+void*   l25_deque_create(int64_t elem_size);
+void    l25_deque_destroy(void* deq);
+void    l25_deque_push_front(void* deq, const void* elem);
+void    l25_deque_push_back(void* deq, const void* elem);
+void    l25_deque_pop_front(void* deq, void* out_elem);
+void    l25_deque_pop_back(void* deq, void* out_elem);
+void*   l25_deque_get(void* deq, int64_t index);
+void    l25_deque_set(void* deq, int64_t index, const void* elem);
+void*   l25_deque_front(void* deq);
+void*   l25_deque_back(void* deq);
+int64_t l25_deque_len(void* deq);
+
+/* ===== Queue API ===== */
+
+void*   l25_queue_create(int64_t elem_size);
+void    l25_queue_destroy(void* que);
+void    l25_queue_push(void* que, const void* elem);
+void    l25_queue_pop(void* que, void* out_elem);
+void*   l25_queue_front(void* que);
+void*   l25_queue_back(void* que);
+int64_t l25_queue_len(void* que);
+
 #ifdef __cplusplus
 }
 #endif

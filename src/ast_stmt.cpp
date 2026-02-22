@@ -112,6 +112,26 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
                                      llvm::Type::getInt32Ty(ctx.context)}, false));
         llvm::Value* mapPtr = ctx.builder.CreateCall(createFn, {keySizeVal, valSizeVal, keyTagVal}, "map.create");
         ctx.builder.CreateStore(mapPtr, alloca);
+    } else if (typeInfo.kind == SymbolKind::Deque && typeInfo.pointerLevel == 0) {
+        ensureContainerRuntimeDeclared(ctx);
+        TypeInfo elemType = typeInfo.typeParams.empty() ? TypeInfo{ SymbolKind::Int, {}, 0 } : typeInfo.typeParams[0];
+        uint64_t elemSize = getTypeAllocSize(elemType, ctx);
+        llvm::Value* elemSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), elemSize);
+        llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_deque_create",
+            llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+                                    {llvm::Type::getInt64Ty(ctx.context)}, false));
+        llvm::Value* deqPtr = ctx.builder.CreateCall(createFn, {elemSizeVal}, "deque.create");
+        ctx.builder.CreateStore(deqPtr, alloca);
+    } else if (typeInfo.kind == SymbolKind::Queue && typeInfo.pointerLevel == 0) {
+        ensureContainerRuntimeDeclared(ctx);
+        TypeInfo elemType = typeInfo.typeParams.empty() ? TypeInfo{ SymbolKind::Int, {}, 0 } : typeInfo.typeParams[0];
+        uint64_t elemSize = getTypeAllocSize(elemType, ctx);
+        llvm::Value* elemSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), elemSize);
+        llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_queue_create",
+            llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+                                    {llvm::Type::getInt64Ty(ctx.context)}, false));
+        llvm::Value* quePtr = ctx.builder.CreateCall(createFn, {elemSizeVal}, "queue.create");
+        ctx.builder.CreateStore(quePtr, alloca);
     }
 
     if (!alloca) {
@@ -141,6 +161,12 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         symbolInfo->hasCleanup = true;
     } else if (typeInfo.kind == SymbolKind::Map && typeInfo.pointerLevel == 0) {
         ctx.registerCleanup(alloca, CleanupKind::Map);
+        symbolInfo->hasCleanup = true;
+    } else if (typeInfo.kind == SymbolKind::Deque && typeInfo.pointerLevel == 0) {
+        ctx.registerCleanup(alloca, CleanupKind::Deque);
+        symbolInfo->hasCleanup = true;
+    } else if (typeInfo.kind == SymbolKind::Queue && typeInfo.pointerLevel == 0) {
+        ctx.registerCleanup(alloca, CleanupKind::Queue);
         symbolInfo->hasCleanup = true;
     }
 
@@ -225,6 +251,12 @@ llvm::Value* AssignStmt::codeGen(CodeGenContext& ctx) const
     // 指针下标赋值：lhsType 应为元素类型而非指针类型
     if (auto arrayExpr = dynamic_cast<ArraySubscriptExpr*>(name.get())) {
         if (targetSymbol && targetSymbol->kind == SymbolKind::Pointer && targetSymbol->pointerLevel > 0) {
+            lhsType = evaluateExprType(name.get());
+        }
+        // 容器下标赋值：lhsType 应为元素/值类型
+        if (targetSymbol && (targetSymbol->kind == SymbolKind::Vector
+            || targetSymbol->kind == SymbolKind::Map
+            || targetSymbol->kind == SymbolKind::Deque)) {
             lhsType = evaluateExprType(name.get());
         }
     }

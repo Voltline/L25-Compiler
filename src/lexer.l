@@ -58,6 +58,8 @@ ident {letter}({letter}|[0-9])*
 "invoke"  { updateLocationAndColumn(); return INVOKE; }
 "vector"    { updateLocationAndColumn(); return VECTOR; }
 "map"       { updateLocationAndColumn(); return MAP; }
+"deque"     { updateLocationAndColumn(); return DEQUE; }
+"queue"     { updateLocationAndColumn(); return QUEUE; }
 
 {floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }

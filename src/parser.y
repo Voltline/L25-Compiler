@@ -121,7 +121,7 @@ extern Program* rootProgram;
 
 %token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
-%token VECTOR MAP
+%token VECTOR MAP DEQUE QUEUE
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token AND OR NOT
@@ -1091,6 +1091,18 @@ base_type:
         $$->typeParams.push_back(*$5);
         delete $3;
         delete $5;
+    }
+    | DEQUE LT type_info GT
+    {
+        $$ = new TypeInfo{ SymbolKind::Deque, {}, 0, false };
+        $$->typeParams.push_back(*$3);
+        delete $3;
+    }
+    | QUEUE LT type_info GT
+    {
+        $$ = new TypeInfo{ SymbolKind::Queue, {}, 0, false };
+        $$->typeParams.push_back(*$3);
+        delete $3;
     }
     ;
 %%

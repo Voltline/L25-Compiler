@@ -1,0 +1,53 @@
+// 测试 deque 容器：双端队列
+
+program TestDeque {
+    main {
+        // 基本 push_back 和 len
+        let d: deque<int>;
+        d.push_back(10);
+        d.push_back(20);
+        d.push_back(30);
+        output(d.len());     // expect 3
+
+        // front / back
+        output(d.front());   // expect 10
+        output(d.back());    // expect 30
+
+        // push_front
+        d.push_front(5);
+        output(d.front());   // expect 5
+        output(d.len());     // expect 4
+
+        // 下标访问: d = [5, 10, 20, 30]
+        output(d[0]);        // expect 5
+        output(d[1]);        // expect 10
+        output(d[2]);        // expect 20
+        output(d[3]);        // expect 30
+
+        // 下标写入
+        d[2] = 99;
+        output(d[2]);        // expect 99
+
+        // pop_front / pop_back
+        let front_val: int = d.pop_front();
+        output(front_val);   // expect 5
+
+        let back_val: int = d.pop_back();
+        output(back_val);    // expect 30
+
+        output(d.len());     // expect 2
+
+        // 大量 push 触发扩容
+        let d2: deque<int>;
+        for (let i: int = 0; i < 100; i = i + 1) {
+            if (i % 2 == 0) {
+                d2.push_back(i);
+            } else {
+                d2.push_front(i);
+            };
+        };
+        output(d2.len());    // expect 100
+        output(d2.front());  // expect 99
+        output(d2.back());   // expect 98
+    }
+}

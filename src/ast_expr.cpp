@@ -522,6 +522,22 @@ llvm::Value* ArraySubscriptExpr::codeGen(CodeGenContext& ctx) const {
         return ctx.builder.CreateLoad(valLLVMTy, typedPtr, "map.sub.val");
     }
 
+    // ===== Deque 下标读取 =====
+    if (symbol->kind == SymbolKind::Deque) {
+        ensureContainerRuntimeDeclared(ctx);
+        llvm::Value* containerPtr = ctx.builder.CreateLoad(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            symbol->addr, "deq.load");
+        llvm::Value* idx = subscript[0]->codeGen(ctx);
+        idx = castValueToType(idx, llvm::Type::getInt64Ty(ctx.context), ctx);
+        llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_get");
+        llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr, idx}, "deq.sub.ptr");
+        TypeInfo elemType = getContainerElemType(symbol);
+        llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+        llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+        return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "deq.sub.val");
+    }
+
     // ===== 指针下标访问（new T[n] 返回的堆指针）=====
     if (symbol->pointerLevel > 0 && symbol->kind == SymbolKind::Pointer) {
         llvm::Type* elemTy = symbol->isFloat
@@ -627,6 +643,21 @@ llvm::Value* ArraySubscriptExpr::getAddress(CodeGenContext& ctx) const {
         llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_get");
         llvm::Value* valPtr = ctx.builder.CreateCall(fn, {containerPtr, keyPtr}, "map.addr.ptr");
         return ctx.builder.CreateBitCast(valPtr, llvm::PointerType::get(valLLVMTy, 0));
+    }
+
+    // ===== Deque 下标地址（用于 d[i] = x）=====
+    if (symbol->kind == SymbolKind::Deque) {
+        ensureContainerRuntimeDeclared(ctx);
+        llvm::Value* containerPtr = ctx.builder.CreateLoad(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            symbol->addr, "deq.addr.load");
+        llvm::Value* idx = subscript[0]->codeGen(ctx);
+        idx = castValueToType(idx, llvm::Type::getInt64Ty(ctx.context), ctx);
+        llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_get");
+        llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr, idx}, "deq.addr.ptr");
+        TypeInfo elemType = getContainerElemType(symbol);
+        llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+        return ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
     }
 
     // ===== 指针下标地址（new T[n] 返回的堆指针）=====
@@ -817,7 +848,8 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
     TypeInfo baseType = evaluateExprType(target.get());
 
     // ===== 容器方法调用分发 =====
-    if (baseType.kind == SymbolKind::Vector || baseType.kind == SymbolKind::Map) {
+    if (baseType.kind == SymbolKind::Vector || baseType.kind == SymbolKind::Map
+        || baseType.kind == SymbolKind::Deque || baseType.kind == SymbolKind::Queue) {
         ensureContainerRuntimeDeclared(ctx);
         // 获取容器指针 (i8*)
         llvm::Value* containerPtr = target->codeGen(ctx);
@@ -881,7 +913,7 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
                 llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "vec.len");
                 return ctx.builder.CreateTrunc(len64, i32Ty, "vec.len.i32");
             }
-        } else { // Map
+        } else if (baseType.kind == SymbolKind::Map) {
             TypeInfo keyType = containerSym ? getContainerKeyType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
             TypeInfo valType = containerSym ? getContainerValueType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
             llvm::Type* keyLLVMTy = typeInfoToLLVMValueType(keyType, ctx.context);
@@ -930,6 +962,107 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
                 llvm::FunctionCallee fn = ctx.module.getFunction("l25_map_len");
                 llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "map.len");
                 return ctx.builder.CreateTrunc(len64, i32Ty, "map.len.i32");
+            }
+        } else if (baseType.kind == SymbolKind::Deque) {
+            TypeInfo elemType = containerSym ? getContainerElemType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+            if (mname == "push_front") {
+                llvm::Value* elemVal = args->args[0]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "deq.pf.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_push_front");
+                ctx.builder.CreateCall(fn, {containerPtr, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "push_back") {
+                llvm::Value* elemVal = args->args[0]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "deq.pb.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_push_back");
+                ctx.builder.CreateCall(fn, {containerPtr, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "pop_front") {
+                llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "deq.pf.out");
+                llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_pop_front");
+                ctx.builder.CreateCall(fn, {containerPtr, outCast});
+                return ctx.builder.CreateLoad(elemLLVMTy, out, "deq.pf.val");
+            } else if (mname == "pop_back") {
+                llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "deq.pb.out");
+                llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_pop_back");
+                ctx.builder.CreateCall(fn, {containerPtr, outCast});
+                return ctx.builder.CreateLoad(elemLLVMTy, out, "deq.pb.val");
+            } else if (mname == "get") {
+                llvm::Value* idx = args->args[0]->codeGen(ctx);
+                idx = castValueToType(idx, i64Ty, ctx);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_get");
+                llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr, idx}, "deq.get.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+                return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "deq.get.val");
+            } else if (mname == "set") {
+                llvm::Value* idx = args->args[0]->codeGen(ctx);
+                idx = castValueToType(idx, i64Ty, ctx);
+                llvm::Value* elemVal = args->args[1]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "deq.set.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_set");
+                ctx.builder.CreateCall(fn, {containerPtr, idx, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "front") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_front");
+                llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr}, "deq.front.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+                return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "deq.front.val");
+            } else if (mname == "back") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_back");
+                llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr}, "deq.back.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+                return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "deq.back.val");
+            } else if (mname == "len") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_deque_len");
+                llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "deq.len");
+                return ctx.builder.CreateTrunc(len64, i32Ty, "deq.len.i32");
+            }
+        } else if (baseType.kind == SymbolKind::Queue) {
+            TypeInfo elemType = containerSym ? getContainerElemType(containerSym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+            if (mname == "push") {
+                llvm::Value* elemVal = args->args[0]->codeGen(ctx);
+                elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "que.push.tmp");
+                ctx.builder.CreateStore(elemVal, tmp);
+                llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_queue_push");
+                ctx.builder.CreateCall(fn, {containerPtr, tmpCast});
+                return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "pop") {
+                llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "que.pop.out");
+                llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_queue_pop");
+                ctx.builder.CreateCall(fn, {containerPtr, outCast});
+                return ctx.builder.CreateLoad(elemLLVMTy, out, "que.pop.val");
+            } else if (mname == "front") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_queue_front");
+                llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr}, "que.front.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+                return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "que.front.val");
+            } else if (mname == "back") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_queue_back");
+                llvm::Value* elemPtr = ctx.builder.CreateCall(fn, {containerPtr}, "que.back.ptr");
+                llvm::Value* typedPtr = ctx.builder.CreateBitCast(elemPtr, llvm::PointerType::get(elemLLVMTy, 0));
+                return ctx.builder.CreateLoad(elemLLVMTy, typedPtr, "que.back.val");
+            } else if (mname == "len") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_queue_len");
+                llvm::Value* len64 = ctx.builder.CreateCall(fn, {containerPtr}, "que.len");
+                return ctx.builder.CreateTrunc(len64, i32Ty, "que.len.i32");
             }
         }
         reportError("未知的容器方法：" + mname);
@@ -1178,7 +1311,8 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
         return ctx.builder.CreateLoad(strTy, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Array) {
         return symbol->addr;
-    } else if (symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Map) {
+    } else if (symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Map
+            || symbol->kind == SymbolKind::Deque  || symbol->kind == SymbolKind::Queue) {
         // 容器是不透明指针 (i8*)，直接 load
         llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
         return ctx.builder.CreateLoad(i8PtrTy, symbol->addr, ident);

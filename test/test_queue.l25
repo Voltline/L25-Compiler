@@ -1,0 +1,42 @@
+// 测试 queue 容器：FIFO 队列
+
+program TestQueue {
+    main {
+        let q: queue<int>;
+
+        // push 和 len
+        q.push(10);
+        q.push(20);
+        q.push(30);
+        output(q.len());     // expect 3
+
+        // front / back
+        output(q.front());   // expect 10
+        output(q.back());    // expect 30
+
+        // pop (FIFO: 先进先出)
+        let v1: int = q.pop();
+        output(v1);          // expect 10
+
+        let v2: int = q.pop();
+        output(v2);          // expect 20
+
+        output(q.len());     // expect 1
+        output(q.front());   // expect 30
+
+        // 大量 push 触发扩容
+        let q2: queue<int>;
+        for (let i: int = 0; i < 100; i = i + 1) {
+            q2.push(i);
+        };
+        output(q2.len());    // expect 100
+        output(q2.front());  // expect 0
+        output(q2.back());   // expect 99
+
+        // pop all
+        for (let i: int = 0; i < 100; i = i + 1) {
+            q2.pop();
+        };
+        output(q2.len());    // expect 0
+    }
+}

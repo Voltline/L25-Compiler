@@ -98,7 +98,8 @@ llvm::Type* typeInfoToLLVMType(const TypeInfo& typeInfo, llvm::LLVMContext& ctx,
         }
     } else if (typeInfo.kind == SymbolKind::String) {
         baseType = getL25StringType(ctx);
-    } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map) {
+    } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map
+            || typeInfo.kind == SymbolKind::Deque  || typeInfo.kind == SymbolKind::Queue) {
         // 容器类型在 IR 层是不透明指针 (i8*)
         baseType = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0);
     }
@@ -133,7 +134,8 @@ llvm::Type* typeInfoToLLVMValueType(const TypeInfo& typeInfo, llvm::LLVMContext&
         }
     } else if (typeInfo.kind == SymbolKind::String) {
         baseType = getL25StringType(ctx);
-    } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map) {
+    } else if (typeInfo.kind == SymbolKind::Vector || typeInfo.kind == SymbolKind::Map
+            || typeInfo.kind == SymbolKind::Deque  || typeInfo.kind == SymbolKind::Queue) {
         baseType = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx), 0);
     } else {
         baseType = scalarType;
@@ -279,7 +281,7 @@ TypeInfo evaluateExprType(const Expr* expr)
         Scope* lookupScope = arrayExpr->scope ? arrayExpr->scope : (arrayExpr->array ? arrayExpr->array->scope : nullptr);
         SymbolInfo* symbol = lookupScope ? lookupScope->lookup(arrayExpr->array->ident) : nullptr;
         if (symbol) {
-            if (symbol->kind == SymbolKind::Vector) {
+            if (symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Deque) {
                 return getContainerElemType(symbol);
             }
             if (symbol->kind == SymbolKind::Map) {
@@ -381,6 +383,30 @@ TypeInfo evaluateExprType(const Expr* expr)
             if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
             return TypeInfo{ SymbolKind::Int, {}, 0 };
         }
+        if (targetType.kind == SymbolKind::Deque) {
+            const std::string& mname = methodCall->method->ident;
+            SymbolInfo* sym = nullptr;
+            if (auto ident = dynamic_cast<const IdentExpr*>(methodCall->target.get())) {
+                if (ident->scope) sym = ident->scope->lookup(ident->ident);
+            }
+            if (mname == "get" || mname == "front" || mname == "back" || mname == "pop_front" || mname == "pop_back") {
+                return sym ? getContainerElemType(sym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            }
+            if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            return TypeInfo{ SymbolKind::Int, {}, 0 };
+        }
+        if (targetType.kind == SymbolKind::Queue) {
+            const std::string& mname = methodCall->method->ident;
+            SymbolInfo* sym = nullptr;
+            if (auto ident = dynamic_cast<const IdentExpr*>(methodCall->target.get())) {
+                if (ident->scope) sym = ident->scope->lookup(ident->ident);
+            }
+            if (mname == "front" || mname == "back" || mname == "pop") {
+                return sym ? getContainerElemType(sym) : TypeInfo{ SymbolKind::Int, {}, 0 };
+            }
+            if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            return TypeInfo{ SymbolKind::Int, {}, 0 };
+        }
         std::string className = targetType.className;
         if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
             className = targetType.className;
@@ -439,8 +465,10 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             break;
         }
         case CleanupKind::Vector:
-        case CleanupKind::Map: {
-            // 加载容器指针，非空则调用 l25_vector_destroy / l25_map_destroy
+        case CleanupKind::Map:
+        case CleanupKind::Deque:
+        case CleanupKind::Queue: {
+            // 加载容器指针，非空则调用对应的 destroy
             llvm::Value* ptr = ctx.builder.CreateLoad(i8PtrTy, entry.addr, "cleanup.container");
 
             llvm::BasicBlock* destroyBB = llvm::BasicBlock::Create(ctx.context, "cleanup.container.del", func);
@@ -451,8 +479,14 @@ void emitCleanupForEntry(CodeGenContext& ctx, const CleanupEntry& entry)
             ctx.builder.CreateCondBr(isNull, contBB, destroyBB);
 
             ctx.builder.SetInsertPoint(destroyBB);
-            std::string destroyFnName = (entry.kind == CleanupKind::Vector)
-                ? "l25_vector_destroy" : "l25_map_destroy";
+            std::string destroyFnName;
+            switch (entry.kind) {
+                case CleanupKind::Vector: destroyFnName = "l25_vector_destroy"; break;
+                case CleanupKind::Map:    destroyFnName = "l25_map_destroy"; break;
+                case CleanupKind::Deque:  destroyFnName = "l25_deque_destroy"; break;
+                case CleanupKind::Queue:  destroyFnName = "l25_queue_destroy"; break;
+                default: break;
+            }
             llvm::FunctionCallee destroyFn = ctx.module.getOrInsertFunction(destroyFnName,
                 llvm::FunctionType::get(llvm::Type::getVoidTy(ctx.context), {i8PtrTy}, false));
             ctx.builder.CreateCall(destroyFn, {ptr});
@@ -673,6 +707,82 @@ void ensureContainerRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_map_len",
             llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
     }
+
+    // Deque API
+    if (!ctx.module.getFunction("l25_deque_create")) {
+        ctx.module.getOrInsertFunction("l25_deque_create",
+            llvm::FunctionType::get(i8PtrTy, {i64Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_destroy")) {
+        ctx.module.getOrInsertFunction("l25_deque_destroy",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_push_front")) {
+        ctx.module.getOrInsertFunction("l25_deque_push_front",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_push_back")) {
+        ctx.module.getOrInsertFunction("l25_deque_push_back",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_pop_front")) {
+        ctx.module.getOrInsertFunction("l25_deque_pop_front",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_pop_back")) {
+        ctx.module.getOrInsertFunction("l25_deque_pop_back",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_get")) {
+        ctx.module.getOrInsertFunction("l25_deque_get",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy, i64Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_set")) {
+        ctx.module.getOrInsertFunction("l25_deque_set",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i64Ty, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_front")) {
+        ctx.module.getOrInsertFunction("l25_deque_front",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_back")) {
+        ctx.module.getOrInsertFunction("l25_deque_back",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_deque_len")) {
+        ctx.module.getOrInsertFunction("l25_deque_len",
+            llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
+    }
+
+    // Queue API
+    if (!ctx.module.getFunction("l25_queue_create")) {
+        ctx.module.getOrInsertFunction("l25_queue_create",
+            llvm::FunctionType::get(i8PtrTy, {i64Ty}, false));
+    }
+    if (!ctx.module.getFunction("l25_queue_destroy")) {
+        ctx.module.getOrInsertFunction("l25_queue_destroy",
+            llvm::FunctionType::get(voidTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_queue_push")) {
+        ctx.module.getOrInsertFunction("l25_queue_push",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_queue_pop")) {
+        ctx.module.getOrInsertFunction("l25_queue_pop",
+            llvm::FunctionType::get(voidTy, {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_queue_front")) {
+        ctx.module.getOrInsertFunction("l25_queue_front",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_queue_back")) {
+        ctx.module.getOrInsertFunction("l25_queue_back",
+            llvm::FunctionType::get(i8PtrTy, {i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_queue_len")) {
+        ctx.module.getOrInsertFunction("l25_queue_len",
+            llvm::FunctionType::get(i64Ty, {i8PtrTy}, false));
+    }
 }
 
 uint64_t getTypeAllocSize(const TypeInfo& typeInfo, CodeGenContext& ctx)
@@ -694,7 +804,8 @@ int32_t getMapKeyTypeTag(const TypeInfo& keyType)
 TypeInfo getContainerElemType(const SymbolInfo* symbol)
 {
     if (!symbol) return TypeInfo{ SymbolKind::Int, {}, 0, false };
-    if (symbol->kind == SymbolKind::Vector && !symbol->typeParams.empty()) {
+    if ((symbol->kind == SymbolKind::Vector || symbol->kind == SymbolKind::Deque
+         || symbol->kind == SymbolKind::Queue) && !symbol->typeParams.empty()) {
         return symbol->typeParams[0];
     }
     return TypeInfo{ SymbolKind::Int, {}, 0, false };

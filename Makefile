@@ -118,8 +118,14 @@ l25_map.o: $(RUNTIME_DIR)/l25_map.c $(RUNTIME_DIR)/l25_runtime.h
 l25_gc.o: $(RUNTIME_DIR)/l25_gc.c $(RUNTIME_DIR)/l25_gc.h
 	$(CC) -O2 -c $(RUNTIME_DIR)/l25_gc.c -I$(RUNTIME_DIR) -o l25_gc.o
 
-libl25rt.a: l25_vector.o l25_map.o l25_gc.o
-	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o
+l25_deque.o: $(RUNTIME_DIR)/l25_deque.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_deque.c -I$(RUNTIME_DIR) -o l25_deque.o
+
+l25_queue.o: $(RUNTIME_DIR)/l25_queue.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_queue.c -I$(RUNTIME_DIR) -o l25_queue.o
+
+libl25rt.a: l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o
+	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o
 
 clean:
 	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output libl25rt.a bench_gc

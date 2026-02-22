@@ -462,8 +462,9 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             reportError(expr, "数组未声明：" + subscript->array->ident);
             return;
         }
-        // 允许 Vector 和 Map 的下标访问
-        if (arraySymbol->kind == SymbolKind::Vector || arraySymbol->kind == SymbolKind::Map) {
+        // 允许 Vector、Map、Deque 的下标访问
+        if (arraySymbol->kind == SymbolKind::Vector || arraySymbol->kind == SymbolKind::Map
+            || arraySymbol->kind == SymbolKind::Deque) {
             if (subscript->subscript.size() != 1) {
                 reportError(*subscript, "容器下标访问只允许一个索引");
                 return;
@@ -554,6 +555,46 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             else if (mname == "len" && argCount == 0) { /* ok */ }
             else {
                 reportError(*methodCall, "map 不存在方法或参数数量不匹配：" + mname);
+                return;
+            }
+            if (methodCall->args) {
+                for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+            }
+            return;
+        }
+        if (targetType.kind == SymbolKind::Deque) {
+            const std::string& mname = methodCall->method->ident;
+            size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+            // 合法方法: push_front(1), push_back(1), pop_front(0), pop_back(0), get(1), set(2), front(0), back(0), len(0)
+            if (mname == "push_front" && argCount == 1) { /* ok */ }
+            else if (mname == "push_back" && argCount == 1) { /* ok */ }
+            else if (mname == "pop_front" && argCount == 0) { /* ok */ }
+            else if (mname == "pop_back" && argCount == 0) { /* ok */ }
+            else if (mname == "get" && argCount == 1) { /* ok */ }
+            else if (mname == "set" && argCount == 2) { /* ok */ }
+            else if (mname == "front" && argCount == 0) { /* ok */ }
+            else if (mname == "back" && argCount == 0) { /* ok */ }
+            else if (mname == "len" && argCount == 0) { /* ok */ }
+            else {
+                reportError(*methodCall, "deque 不存在方法或参数数量不匹配：" + mname);
+                return;
+            }
+            if (methodCall->args) {
+                for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+            }
+            return;
+        }
+        if (targetType.kind == SymbolKind::Queue) {
+            const std::string& mname = methodCall->method->ident;
+            size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+            // 合法方法: push(1), pop(0), front(0), back(0), len(0)
+            if (mname == "push" && argCount == 1) { /* ok */ }
+            else if (mname == "pop" && argCount == 0) { /* ok */ }
+            else if (mname == "front" && argCount == 0) { /* ok */ }
+            else if (mname == "back" && argCount == 0) { /* ok */ }
+            else if (mname == "len" && argCount == 0) { /* ok */ }
+            else {
+                reportError(*methodCall, "queue 不存在方法或参数数量不匹配：" + mname);
                 return;
             }
             if (methodCall->args) {

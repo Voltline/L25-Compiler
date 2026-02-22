@@ -59,6 +59,8 @@ enum class CleanupKind {
     ClassPtr,    // GC 模式下仅移除根
     Vector,      // l25_vector_destroy
     Map,         // l25_map_destroy
+    Deque,       // l25_deque_destroy
+    Queue,       // l25_queue_destroy
     GCRoot,      // GC 根注销（this 指针 / 函数参数）
 };
 
