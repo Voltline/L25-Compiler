@@ -209,7 +209,7 @@ program dynamic_call {
 ```
 &emsp; `invoke` returns `int` (method return values of other types are cast to `int`). It matches candidate methods by argument count and dispatches via `strcmp` at runtime.
 
-* 📦 *Generic Containers — Vector and Map*:
+* 📦 *Generic Containers — Vector, Map, Deque and Queue*:
 ```L25
 program containers {
     main {
@@ -234,10 +234,37 @@ program containers {
         output(m.contains(1)); // 1
         m.erase(1);
         output(m.len());       // 1
+
+        // deque<int>
+        let d: deque<int>;
+        d.push_back(10);
+        d.push_back(20);
+        d.push_front(5);
+        output(d.len());       // 3
+        output(d.front());     // 5
+        output(d.back());      // 20
+        output(d[1]);          // 10
+        d[1] = 99;
+        let f: int = d.pop_front();
+        output(f);             // 5
+        let b: int = d.pop_back();
+        output(b);             // 20
+
+        // queue<int>
+        let q: queue<int>;
+        q.push(10);
+        q.push(20);
+        q.push(30);
+        output(q.len());       // 3
+        output(q.front());     // 10
+        output(q.back());      // 30
+        let v1: int = q.pop();
+        output(v1);            // 10
+        output(q.len());       // 2
     }
 }
 ```
-&emsp; Vectors support `push`, `pop`, `get`, `set`, `len`, and bracket subscript (`v[i]` / `v[i] = val`).  Maps support `set`, `get`, `contains`, `erase`, `len`, and bracket subscript (`m[k]` / `m[k] = val`).  Both containers are automatically freed when they go out of scope.
+&emsp; Vectors support `push`, `pop`, `get`, `set`, `len`, and bracket subscript (`v[i]` / `v[i] = val`).  Maps support `set`, `get`, `contains`, `erase`, `len`, and bracket subscript (`m[k]` / `m[k] = val`).  Deques (double-ended queues) support `push_front`, `push_back`, `pop_front`, `pop_back`, `front`, `back`, `get`, `set`, `len`, and bracket subscript (`d[i]` / `d[i] = val`). Queues (FIFO) support `push`, `pop`, `front`, `back`, and `len`. All four containers are automatically freed when they go out of scope.
 
 * ♻️ *Mark-and-Sweep Garbage Collection*:
 ```L25
@@ -617,6 +644,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <member_access>
     | <array_subscript_expr>
     | "new" <ident> "(" [ <arg_list> ] ")"
+    | "new" ( "int" | "float" ) "[" <expr> "]"
     | "strlen" "(" <expr> ")"
     | "typename" "(" <expr> ")"
     | "fieldcount" "(" <expr> ")"
@@ -645,6 +673,8 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | "*" <type_info>
     | "vector" "<" <base_type> ">"
     | "map" "<" <base_type> "," <base_type> ">"
+    | "deque" "<" <base_type> ">"
+    | "queue" "<" <base_type> ">"
 
 <base_type> =
     "int" | "float" | "string" | <ident>
@@ -760,9 +790,11 @@ L25-Compiler/
 │   ├── logo-light.png
 │   └── logo.png
 ├── runtime
+│   ├── l25_deque.c
 │   ├── l25_gc.c
 │   ├── l25_gc.h
 │   ├── l25_map.c
+│   ├── l25_queue.c
 │   ├── l25_runtime.h
 │   └── l25_vector.c
 ├── src
@@ -791,6 +823,7 @@ L25-Compiler/
 │   ├── test_closure.l25
 │   ├── test_delete_gc.l25
 │   ├── test_delete_safety.l25
+│   ├── test_deque.l25
 │   ├── test_float.l25
 │   ├── test_for.l25
 │   ├── test_gc.l25
@@ -799,6 +832,7 @@ L25-Compiler/
 │   ├── test_map.l25
 │   ├── test_new_array.l25
 │   ├── test_pointer.l25
+│   ├── test_queue.l25
 │   ├── test_raii_class.l25
 │   ├── test_raii_func.l25
 │   ├── test_raii_linked_list.l25
