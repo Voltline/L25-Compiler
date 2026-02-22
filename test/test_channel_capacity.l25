@@ -1,0 +1,12 @@
+program chancap {
+    main {
+        let ch: channel<int, 4>;
+        ch.send(10);
+        ch.send(20);
+        ch.send(30);
+        ch.send(40);
+        let sum: int = 0;
+        sum = ch.recv() + ch.recv() + ch.recv() + ch.recv();
+        output(sum);
+    }
+}

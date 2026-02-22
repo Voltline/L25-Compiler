@@ -1117,5 +1117,12 @@ base_type:
         $$->typeParams.push_back(*$3);
         delete $3;
     }
+    | CHANNEL LT type_info COMMA NUMBER GT
+    {
+        $$ = new TypeInfo{ SymbolKind::Channel, {}, 0, false };
+        $$->typeParams.push_back(*$3);
+        $$->channelCapacity = $5;
+        delete $3;
+    }
     ;
 %%

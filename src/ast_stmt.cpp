@@ -137,7 +137,8 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         TypeInfo elemType = typeInfo.typeParams.empty() ? TypeInfo{ SymbolKind::Int, {}, 0 } : typeInfo.typeParams[0];
         uint64_t elemSize = getTypeAllocSize(elemType, ctx);
         llvm::Value* elemSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), elemSize);
-        llvm::Value* capVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), 1);
+        int cap = typeInfo.channelCapacity > 0 ? typeInfo.channelCapacity : 1;
+        llvm::Value* capVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), cap);
         llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_channel_create",
             llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
                                     {llvm::Type::getInt64Ty(ctx.context), llvm::Type::getInt64Ty(ctx.context)}, false));
