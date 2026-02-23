@@ -1,0 +1,36 @@
+program tcp_echo {
+    import net;
+
+    main {
+        let server_fd = net.tcp_listen(8080);
+        if (server_fd >= 0) {
+            printf("TCP Echo Server listening on port 8080\n");
+
+            let client_fd = net.tcp_accept(server_fd);
+            if (client_fd >= 0) {
+                printf("Client connected\n");
+
+                let running = 1;
+                while (running == 1) {
+                    let msg = net.tcp_recv(client_fd, 1024);
+                    if (strlen(msg) == 0) {
+                        printf("Client disconnected\n");
+                        running = 0;
+                    } else {
+                        printf("Received: %s\n", msg);
+                        net.tcp_send(client_fd, msg);
+                    };
+                };
+
+                net.close(client_fd);
+            } else {
+                printf("Failed to accept connection\n");
+            };
+
+            net.close(server_fd);
+            printf("Server closed\n");
+        } else {
+            printf("Failed to start server\n");
+        };
+    }
+}

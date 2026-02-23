@@ -77,6 +77,19 @@ void    l25_thread_pool_init(void);
 void    l25_thread_spawn(void (*fn)(void*), void* arg);
 void    l25_thread_pool_shutdown(void);
 
+/* ===== Networking API ===== */
+
+int32_t l25_net_tcp_listen(int32_t port);
+int32_t l25_net_tcp_accept(int32_t listen_fd);
+int32_t l25_net_tcp_connect(const char* host, int32_t port);
+int32_t l25_net_tcp_send(int32_t fd, const char* data, int32_t len);
+char*   l25_net_tcp_recv(int32_t fd, int32_t max_len, int32_t* out_len);
+void    l25_net_close(int32_t fd);
+int32_t l25_net_udp_socket(void);
+int32_t l25_net_udp_bind(int32_t fd, int32_t port);
+int32_t l25_net_udp_sendto(int32_t fd, const char* host, int32_t port, const char* data, int32_t len);
+char*   l25_net_udp_recvfrom(int32_t fd, int32_t max_len, int32_t* out_len);
+
 /* ===== String API ===== */
 
 char*   l25_string_substr(const char* data, int32_t data_len, int32_t pos, int32_t sub_len, int32_t* out_len);

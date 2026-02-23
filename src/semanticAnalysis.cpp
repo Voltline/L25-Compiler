@@ -82,6 +82,25 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
         registerBuiltin("std.srand",    "l25_srand",    {intType}, voidType);
     }
 
+    // ===== import net: 网络库函数 =====
+    TypeInfo stringType(SymbolKind::String, {});
+    bool hasImportNet = false;
+    for (const auto& imp : program.imports) {
+        if (imp == "net") hasImportNet = true;
+    }
+    if (hasImportNet) {
+        registerBuiltin("net.tcp_listen",  "l25_net_tcp_listen",  {intType},               intType);
+        registerBuiltin("net.tcp_accept",  "l25_net_tcp_accept",  {intType},               intType);
+        registerBuiltin("net.tcp_connect", "l25_net_tcp_connect", {stringType, intType},    intType);
+        registerBuiltin("net.tcp_send",    "l25_net_tcp_send",    {intType, stringType},    intType);
+        registerBuiltin("net.tcp_recv",    "l25_net_tcp_recv",    {intType, intType},       stringType);
+        registerBuiltin("net.close",       "l25_net_close",       {intType},               voidType);
+        registerBuiltin("net.udp_socket",  "l25_net_udp_socket",  {},                      intType);
+        registerBuiltin("net.udp_bind",    "l25_net_udp_bind",    {intType, intType},       intType);
+        registerBuiltin("net.udp_sendto",  "l25_net_udp_sendto",  {intType, stringType, intType, stringType}, intType);
+        registerBuiltin("net.udp_recvfrom","l25_net_udp_recvfrom",{intType, intType},       stringType);
+    }
+
     // GC 监测函数
     registerBuiltin("gc_stats",     "l25_gc_stats",     {}, voidType);
     registerBuiltin("gc_count",     "l25_gc_count",     {}, intType);

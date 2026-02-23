@@ -585,6 +585,51 @@ program string_methods {
 ```
 &emsp; Strings support the following methods: `substr(pos, len)` extracts a substring (returns a new string); `find(target)` returns the index of the first occurrence of a substring (-1 if not found); `char_at(index)` returns the ASCII value of the character at the given index; `contains(target)` returns 1 if the string contains the substring, 0 otherwise; `to_upper()` and `to_lower()` return case-converted copies; `replace(old, new)` replaces the first occurrence of `old` with `new` (returns a new string). All methods that return strings allocate new buffers via `malloc`. The existing `strlen(s)` built-in function continues to work alongside these methods.
 
+* 🌐 *Networking with `import net;`*:
+```L25
+program tcp_echo {
+    import net;
+
+    main {
+        let server_fd = net.tcp_listen(8080);
+        if (server_fd >= 0) {
+            printf("TCP Echo Server listening on port 8080\n");
+
+            let client_fd = net.tcp_accept(server_fd);
+            if (client_fd >= 0) {
+                printf("Client connected\n");
+
+                let running = 1;
+                while (running == 1) {
+                    let msg = net.tcp_recv(client_fd, 1024);
+                    if (strlen(msg) == 0) {
+                        printf("Client disconnected\n");
+                        running = 0;
+                    } else {
+                        printf("Received: %s\n", msg);
+                        net.tcp_send(client_fd, msg);
+                    };
+                };
+
+                net.close(client_fd);
+            } else {
+                printf("Failed to accept connection\n");
+            };
+
+            net.close(server_fd);
+            printf("Server closed\n");
+        } else {
+            printf("Failed to start server\n");
+        };
+    }
+}
+```
+&emsp; `import net;` enables TCP and UDP networking functions under the `net` namespace, backed by POSIX sockets.
+
+&emsp; **TCP functions:** `net.tcp_listen(port)` creates a listening socket (returns fd, -1 on error); `net.tcp_accept(listen_fd)` accepts a connection (returns client fd); `net.tcp_connect(host, port)` connects to a remote server (returns fd); `net.tcp_send(fd, data)` sends a string (returns bytes sent); `net.tcp_recv(fd, max_len)` receives data (returns a string, empty on disconnect); `net.close(fd)` closes a socket.
+
+&emsp; **UDP functions:** `net.udp_socket()` creates a UDP socket; `net.udp_bind(fd, port)` binds to a port; `net.udp_sendto(fd, host, port, data)` sends data to a target; `net.udp_recvfrom(fd, max_len)` receives data (returns a string).
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -1002,8 +1047,9 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - `break` can only be used inside `while` or `for` loops.
 - `return` can appear anywhere inside a function/method body; bare `return;` defaults to returning 0.
 - Enum values are global constants; duplicate names across enums or with existing symbols will cause a redefinition error.
-- Only `import std` is currently supported; other module names are accepted syntactically but have no effect.
+- Only `import std` and `import net` are currently supported; other module names are accepted syntactically but have no effect.
 - Standard library functions (`clock_ms`, `sleep_ms`, `exit`, `rand`, `srand`) require `import std;` and must be called as `std.xxx()`.
+- Networking functions require `import net;` and must be called as `net.xxx()`. They are backed by POSIX sockets and only available on POSIX-compatible systems.
 
 
 ## 🛠️ Build Instructions
@@ -1082,6 +1128,7 @@ L25-Compiler/
 │   ├── l25_gc.c
 │   ├── l25_gc.h
 │   ├── l25_map.c
+│   ├── l25_net.c
 │   ├── l25_queue.c
 │   ├── l25_runtime.h
 │   ├── l25_stdlib.c

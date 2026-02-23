@@ -59,8 +59,6 @@ void ensureStringRuntimeDeclared(CodeGenContext& ctx) {
     }
 
     // ===== String method runtime functions =====
-    auto* i8PtrPtrTy = llvm::PointerType::get(i32Ty, 0);  // actually i32* for out_len
-    // We use i32* for out_len parameter
     auto* i32PtrTy = llvm::PointerType::get(i32Ty, 0);
 
     // l25_string_substr(data: i8*, data_len: i32, pos: i32, sub_len: i32, out_len: i32*) -> i8*
@@ -398,6 +396,17 @@ TypeInfo evaluateExprType(const Expr* expr)
         return TypeInfo{ SymbolKind::Pointer, {}, 1, newArrExpr->isFloat };
     }
     if (auto methodCall = dynamic_cast<const MethodCallExpr*>(expr)) {
+        // 命名空间函数调用的返回类型推导（如 std.rand, net.tcp_recv）
+        if (auto* ident = dynamic_cast<const IdentExpr*>(methodCall->target.get())) {
+            std::string qualifiedName = ident->ident + "." + methodCall->method->ident;
+            Scope* lookupScope = methodCall->scope ? methodCall->scope : ident->scope;
+            if (lookupScope) {
+                SymbolInfo* sym = lookupScope->lookup(qualifiedName);
+                if (sym && sym->kind == SymbolKind::Function) {
+                    return sym->returnType;
+                }
+            }
+        }
         TypeInfo targetType = evaluateExprType(methodCall->target.get());
         // 容器方法返回类型
         if (targetType.kind == SymbolKind::Vector) {
@@ -1094,6 +1103,60 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
     if (!ctx.module.getFunction("l25_srand")) {
         ctx.module.getOrInsertFunction("l25_srand",
             llvm::FunctionType::get(voidTy, {i32Ty}, false));
+    }
+
+    // ===== Networking API =====
+    // l25_net_tcp_listen(i32) → i32
+    if (!ctx.module.getFunction("l25_net_tcp_listen")) {
+        ctx.module.getOrInsertFunction("l25_net_tcp_listen",
+            llvm::FunctionType::get(i32Ty, {i32Ty}, false));
+    }
+    // l25_net_tcp_accept(i32) → i32
+    if (!ctx.module.getFunction("l25_net_tcp_accept")) {
+        ctx.module.getOrInsertFunction("l25_net_tcp_accept",
+            llvm::FunctionType::get(i32Ty, {i32Ty}, false));
+    }
+    // l25_net_tcp_connect(i8*, i32) → i32
+    if (!ctx.module.getFunction("l25_net_tcp_connect")) {
+        ctx.module.getOrInsertFunction("l25_net_tcp_connect",
+            llvm::FunctionType::get(i32Ty, {i8PtrTy, i32Ty}, false));
+    }
+    // l25_net_tcp_send(i32, i8*, i32) → i32
+    if (!ctx.module.getFunction("l25_net_tcp_send")) {
+        ctx.module.getOrInsertFunction("l25_net_tcp_send",
+            llvm::FunctionType::get(i32Ty, {i32Ty, i8PtrTy, i32Ty}, false));
+    }
+    // l25_net_tcp_recv(i32, i32, i32*) → i8*
+    if (!ctx.module.getFunction("l25_net_tcp_recv")) {
+        auto* i32PtrTy = llvm::PointerType::get(i32Ty, 0);
+        ctx.module.getOrInsertFunction("l25_net_tcp_recv",
+            llvm::FunctionType::get(i8PtrTy, {i32Ty, i32Ty, i32PtrTy}, false));
+    }
+    // l25_net_close(i32) → void
+    if (!ctx.module.getFunction("l25_net_close")) {
+        ctx.module.getOrInsertFunction("l25_net_close",
+            llvm::FunctionType::get(voidTy, {i32Ty}, false));
+    }
+    // l25_net_udp_socket() → i32
+    if (!ctx.module.getFunction("l25_net_udp_socket")) {
+        ctx.module.getOrInsertFunction("l25_net_udp_socket",
+            llvm::FunctionType::get(i32Ty, {}, false));
+    }
+    // l25_net_udp_bind(i32, i32) → i32
+    if (!ctx.module.getFunction("l25_net_udp_bind")) {
+        ctx.module.getOrInsertFunction("l25_net_udp_bind",
+            llvm::FunctionType::get(i32Ty, {i32Ty, i32Ty}, false));
+    }
+    // l25_net_udp_sendto(i32, i8*, i32, i8*, i32) → i32
+    if (!ctx.module.getFunction("l25_net_udp_sendto")) {
+        ctx.module.getOrInsertFunction("l25_net_udp_sendto",
+            llvm::FunctionType::get(i32Ty, {i32Ty, i8PtrTy, i32Ty, i8PtrTy, i32Ty}, false));
+    }
+    // l25_net_udp_recvfrom(i32, i32, i32*) → i8*
+    if (!ctx.module.getFunction("l25_net_udp_recvfrom")) {
+        auto* i32PtrTy = llvm::PointerType::get(i32Ty, 0);
+        ctx.module.getOrInsertFunction("l25_net_udp_recvfrom",
+            llvm::FunctionType::get(i8PtrTy, {i32Ty, i32Ty, i32PtrTy}, false));
     }
 }
 

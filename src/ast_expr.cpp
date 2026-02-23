@@ -850,6 +850,100 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
         std::string qualifiedName = identTarget->ident + "." + method->ident;
         SymbolInfo* funcSymbol = scope->lookup(qualifiedName);
         if (funcSymbol && funcSymbol->kind == SymbolKind::Function) {
+
+            // ===== net.* 特殊处理（涉及字符串参数/返回值）=====
+            if (identTarget->ident == "net") {
+                ensureGCRuntimeDeclared(ctx);
+                const std::string& mname = method->ident;
+                auto* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
+
+                auto getArg = [&](int idx) -> llvm::Value* {
+                    return args->args[idx]->codeGen(ctx);
+                };
+                auto strData = [&](llvm::Value* strVal) -> llvm::Value* {
+                    return ctx.builder.CreateExtractValue(strVal, 1, "str.data");
+                };
+                auto strLen = [&](llvm::Value* strVal) -> llvm::Value* {
+                    return ctx.builder.CreateExtractValue(strVal, 0, "str.len");
+                };
+                auto buildString = [&](llvm::Value* len, llvm::Value* data) -> llvm::Value* {
+                    llvm::StructType* strTy = getL25StringType(ctx.context);
+                    llvm::Value* result = llvm::UndefValue::get(strTy);
+                    result = ctx.builder.CreateInsertValue(result, len, 0);
+                    result = ctx.builder.CreateInsertValue(result, data, 1);
+                    return result;
+                };
+
+                if (mname == "tcp_listen") {
+                    llvm::Value* port = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_tcp_listen");
+                    return ctx.builder.CreateCall(fn, {port}, "tcp_listen");
+                }
+                if (mname == "tcp_accept") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_tcp_accept");
+                    return ctx.builder.CreateCall(fn, {fd}, "tcp_accept");
+                }
+                if (mname == "tcp_connect") {
+                    llvm::Value* hostStr = getArg(0);
+                    llvm::Value* port = castValueToType(getArg(1), i32Ty, ctx);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_tcp_connect");
+                    return ctx.builder.CreateCall(fn, {strData(hostStr), port}, "tcp_connect");
+                }
+                if (mname == "tcp_send") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Value* dataStr = getArg(1);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_tcp_send");
+                    return ctx.builder.CreateCall(fn, {fd, strData(dataStr), strLen(dataStr)}, "tcp_send");
+                }
+                if (mname == "tcp_recv") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Value* maxLen = castValueToType(getArg(1), i32Ty, ctx);
+                    llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "recv.outlen");
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_tcp_recv");
+                    llvm::Value* data = ctx.builder.CreateCall(fn, {fd, maxLen, outLen}, "recv.data");
+                    llvm::Value* len = ctx.builder.CreateLoad(i32Ty, outLen, "recv.len");
+                    return buildString(len, data);
+                }
+                if (mname == "close") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_close");
+                    ctx.builder.CreateCall(fn, {fd});
+                    return llvm::ConstantInt::get(i32Ty, 0);
+                }
+                if (mname == "udp_socket") {
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_udp_socket");
+                    return ctx.builder.CreateCall(fn, {}, "udp_socket");
+                }
+                if (mname == "udp_bind") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Value* port = castValueToType(getArg(1), i32Ty, ctx);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_udp_bind");
+                    return ctx.builder.CreateCall(fn, {fd, port}, "udp_bind");
+                }
+                if (mname == "udp_sendto") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Value* hostStr = getArg(1);
+                    llvm::Value* port = castValueToType(getArg(2), i32Ty, ctx);
+                    llvm::Value* dataStr = getArg(3);
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_udp_sendto");
+                    return ctx.builder.CreateCall(fn,
+                        {fd, strData(hostStr), port, strData(dataStr), strLen(dataStr)}, "udp_sendto");
+                }
+                if (mname == "udp_recvfrom") {
+                    llvm::Value* fd = castValueToType(getArg(0), i32Ty, ctx);
+                    llvm::Value* maxLen = castValueToType(getArg(1), i32Ty, ctx);
+                    llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "recvfrom.outlen");
+                    llvm::Function* fn = ctx.module.getFunction("l25_net_udp_recvfrom");
+                    llvm::Value* data = ctx.builder.CreateCall(fn, {fd, maxLen, outLen}, "recvfrom.data");
+                    llvm::Value* len = ctx.builder.CreateLoad(i32Ty, outLen, "recvfrom.len");
+                    return buildString(len, data);
+                }
+                reportError("未知的网络方法：" + mname);
+                return nullptr;
+            }
+
+            // ===== 通用命名空间函数调用（std.*等）=====
             llvm::Function* calleeFunc = ctx.module.getFunction(funcSymbol->llvmName);
             if (funcSymbol->isBuiltin && !calleeFunc) {
                 ensureGCRuntimeDeclared(ctx);
@@ -1153,9 +1247,7 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
         llvm::Value* strVal = target->codeGen(ctx);
         if (!strVal) { reportError("字符串变量无效"); return nullptr; }
 
-        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
         auto* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
-        auto* i32PtrTy = llvm::PointerType::get(i32Ty, 0);
 
         llvm::Value* strLen  = ctx.builder.CreateExtractValue(strVal, 0, "str.len");
         llvm::Value* strData = ctx.builder.CreateExtractValue(strVal, 1, "str.data");
