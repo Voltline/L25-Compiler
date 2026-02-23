@@ -13,45 +13,41 @@ typedef void (*l25_gc_scan_fn)(void* obj, void (*mark_fn)(void*));
 // 析构函数类型
 typedef void (*l25_gc_dtor_fn)(void* obj);
 
-// ===== 根栈 (Root Stack) =====
-// 编译器直接内联操作这两个全局变量，替代 add_root/remove_root 函数调用。
-// 每个槽位存放一个 void** (指向栈上 alloca 的地址)，GC 扫描时
-// 解引用即可获得实际的 GC 对象指针。
+// ===== 每线程根栈 (Per-Thread Root Stack) =====
+// 每个线程拥有独立的根栈，GC 扫描时统一收集所有线程的根。
+// 编译器通过 l25_gc_root_push/l25_gc_root_pop 操作当前线程的根栈。
 #define L25_ROOT_STACK_MAX 65536
-extern void*   l25_gc_root_stack[L25_ROOT_STACK_MAX];
-extern int32_t l25_gc_root_sp;
+#define L25_MAX_THREADS    128
 
-// 初始化 GC 子系统（程序启动时调用一次）
+// 初始化 GC 子系统（程序启动时调用一次，同时注册主线程）
 void l25_gc_init(void);
 
 // 关闭 GC 子系统，释放所有剩余对象（程序退出前调用）
 void l25_gc_shutdown(void);
 
-// 分配 GC 管理的对象
-//   size:     用户对象大小（不含 GC 头部）
-//   scan_fn:  扫描函数（NULL 表示本对象无需扫描指针字段）
-//   dtor_fn:  析构函数（NULL 表示无需析构）
-// 返回：用户数据指针（已零初始化）
-// 每次分配时推进增量标记（处理若干灰色对象）
+// ===== 线程生命周期 =====
+// 每个 spawn 线程在入口调用 init，退出前调用 fini
+void l25_gc_thread_init(void);
+void l25_gc_thread_fini(void);
+
+// ===== 根栈操作（线程安全，操作当前线程的根栈） =====
+void l25_gc_root_push(void** slot);
+void l25_gc_root_pop(void);
+
+// 分配 GC 管理的对象（线程安全）
 void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn);
 
-// 注册一个 GC 根（兼容接口，内部使用根栈）
+// 注册 / 移除 GC 根（兼容接口，内部转发到 root_push/pop）
 void l25_gc_add_root(void** root);
-
-// 移除一个 GC 根（兼容接口，内部使用根栈 LIFO 弹出）
 void l25_gc_remove_root(void** root);
 
-// 手动触发垃圾回收（完整的标记-清除周期）
+// 手动触发垃圾回收（完整的标记-清除周期，线程安全）
 void l25_gc_collect(void);
 
-// 确定性析构（用于 delete 语句）
-// 调用析构函数并标记对象为"已析构"，但不释放内存。
-// 实际内存释放由 GC sweep 阶段统一处理，避免悬挂指针。
+// 确定性析构（用于 delete 语句，线程安全）
 void l25_gc_free(void* ptr);
 
-// 写屏障（Dijkstra snapshot-at-the-beginning 变体）
-// 当向 GC 管理的对象的指针字段写入新值时调用。
-// 如果增量标记正在进行，将新指针对象标灰以保证不遗漏。
+// 写屏障（线程安全）
 void l25_gc_write_barrier(void* new_ptr);
 
 #ifdef __cplusplus

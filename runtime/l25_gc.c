@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 
 // ===== 三色标记 =====
 enum GCColor {
@@ -21,11 +22,21 @@ typedef struct GCObject {
     l25_gc_dtor_fn   dtor_fn;    // 析构函数（NULL = 无需析构）
 } GCObject;
 
-// ===== 全局根栈 =====
-// 编译器内联操作这两个全局变量（无需函数调用）
-// 每个槽存放一个 void**（栈上 alloca 的地址），扫描时解引用取实际指针
-void*   l25_gc_root_stack[L25_ROOT_STACK_MAX];
-int32_t l25_gc_root_sp = 0;
+// ===== 每线程根栈 =====
+typedef struct {
+    void*   stack[L25_ROOT_STACK_MAX];
+    int32_t sp;
+} ThreadRootStack;
+
+// TLS：当前线程的根栈指针
+static __thread ThreadRootStack* tls_roots = NULL;
+
+// 全局线程根栈注册表（受 gc_lock 保护）
+static ThreadRootStack* all_roots[L25_MAX_THREADS];
+static int              all_roots_count = 0;
+
+// ===== GC 全局互斥锁 =====
+static pthread_mutex_t gc_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // ===== GC 状态机 =====
 typedef enum {
@@ -81,6 +92,7 @@ static void mark_gray(void* ptr) {
 
 // ===== 初始化 =====
 void l25_gc_init(void) {
+    pthread_mutex_lock(&gc_lock);
     gc.objects        = NULL;
     gc.bytes_allocated = 0;
     gc.next_gc        = GC_INITIAL_THRESHOLD;
@@ -89,7 +101,56 @@ void l25_gc_init(void) {
     gc.gray_list      = NULL;
     gc.sweep_cursor   = NULL;
     gc.sweep_prev     = NULL;
-    l25_gc_root_sp    = 0;
+    all_roots_count   = 0;
+    pthread_mutex_unlock(&gc_lock);
+
+    // 注册主线程
+    l25_gc_thread_init();
+}
+
+// ===== 线程注册/注销 =====
+void l25_gc_thread_init(void) {
+    if (tls_roots) return; // 已注册
+    ThreadRootStack* rs = (ThreadRootStack*)calloc(1, sizeof(ThreadRootStack));
+    rs->sp = 0;
+    tls_roots = rs;
+
+    pthread_mutex_lock(&gc_lock);
+    if (all_roots_count < L25_MAX_THREADS) {
+        all_roots[all_roots_count++] = rs;
+    }
+    pthread_mutex_unlock(&gc_lock);
+}
+
+void l25_gc_thread_fini(void) {
+    if (!tls_roots) return;
+    ThreadRootStack* rs = tls_roots;
+    tls_roots = NULL;
+
+    pthread_mutex_lock(&gc_lock);
+    for (int i = 0; i < all_roots_count; i++) {
+        if (all_roots[i] == rs) {
+            all_roots[i] = all_roots[--all_roots_count];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gc_lock);
+    free(rs);
+}
+
+// ===== 根栈操作（操作当前线程的根栈，无需 GC 锁） =====
+void l25_gc_root_push(void** slot) {
+    if (!tls_roots) return;
+    if (tls_roots->sp < L25_ROOT_STACK_MAX) {
+        tls_roots->stack[tls_roots->sp++] = (void*)slot;
+    }
+}
+
+void l25_gc_root_pop(void) {
+    if (!tls_roots) return;
+    if (tls_roots->sp > 0) {
+        tls_roots->sp--;
+    }
 }
 
 // ===== 增量标记：处理 N 个灰色对象 =====
@@ -117,12 +178,16 @@ static void gc_start_cycle(void) {
     }
     gc.gray_list = NULL;
 
-    // 2. 从根栈出发将直接可达对象标灰
-    for (int32_t i = 0; i < l25_gc_root_sp; i++) {
-        void** slot = (void**)l25_gc_root_stack[i];
-        void* ptr = *slot;
-        if (ptr) {
-            shade_gray(get_header(ptr));
+    // 2. 从所有线程的根栈出发将直接可达对象标灰
+    for (int t = 0; t < all_roots_count; t++) {
+        ThreadRootStack* rs = all_roots[t];
+        if (!rs) continue;
+        for (int32_t i = 0; i < rs->sp; i++) {
+            void** slot = (void**)rs->stack[i];
+            void* ptr = *slot;
+            if (ptr) {
+                shade_gray(get_header(ptr));
+            }
         }
     }
 
@@ -210,8 +275,8 @@ static void gc_step(size_t steps) {
     }
 }
 
-// ===== 完整回收（STW） =====
-void l25_gc_collect(void) {
+// ===== 完整回收（STW）—— 内部版本，调用方已持有 gc_lock =====
+static void gc_collect_locked(void) {
     // 如果有进行中的增量周期，先完成它
     if (gc.phase != GC_PHASE_IDLE) {
         if (gc.phase == GC_PHASE_MARKING) {
@@ -238,24 +303,29 @@ void l25_gc_collect(void) {
     gc_sweep_dtors_step(SIZE_MAX);
 
     // Phase 2: free
-    // gc_sweep_dtors_step 完成后已自动进入 GC_PHASE_SWEEP_FREE
     gc_sweep_free_step(SIZE_MAX);
+}
+
+void l25_gc_collect(void) {
+    pthread_mutex_lock(&gc_lock);
+    gc_collect_locked();
+    pthread_mutex_unlock(&gc_lock);
 }
 
 // ===== 关闭 =====
 void l25_gc_shutdown(void) {
+    pthread_mutex_lock(&gc_lock);
+
     // 先完成完整 GC
-    l25_gc_collect();
+    gc_collect_locked();
 
     // 释放所有剩余对象（两阶段：先调析构，再释放）
-    // 阶段 1：析构
     for (GCObject* obj = gc.objects; obj; obj = obj->next) {
         if (!obj->dead && obj->dtor_fn) {
             obj->dtor_fn(get_user_ptr(obj));
             obj->dead = 1;
         }
     }
-    // 阶段 2：释放
     GCObject* obj = gc.objects;
     while (obj) {
         GCObject* next = obj->next;
@@ -265,79 +335,75 @@ void l25_gc_shutdown(void) {
     gc.objects       = NULL;
     gc.object_count  = 0;
     gc.bytes_allocated = 0;
-    l25_gc_root_sp = 0;
+
+    pthread_mutex_unlock(&gc_lock);
+
+    // 注销主线程
+    l25_gc_thread_fini();
 }
 
-// ===== 分配 GC 管理的对象 =====
+// ===== 分配 GC 管理的对象（线程安全） =====
 void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) {
-    // 自适应步进：根据内存压力动态调整推进量
+    pthread_mutex_lock(&gc_lock);
+
+    // 自适应步进
     size_t steps = GC_MARK_STEPS_PER_ALLOC;
     if (gc.next_gc > 0) {
-        // 当内存使用超过阈值的 75% 时加速推进
         size_t threshold_75 = gc.next_gc / 4 * 3;
         if (gc.bytes_allocated >= threshold_75) {
             steps = GC_MARK_STEPS_PER_ALLOC * 8;
         }
-        // 当内存使用超过阈值时，强制完成当前 GC 周期
         if (gc.bytes_allocated >= gc.next_gc && gc.phase != GC_PHASE_IDLE) {
-            l25_gc_collect();
+            gc_collect_locked();
         }
     }
     gc_step(steps);
 
-    GCObject* obj = (GCObject*)malloc(sizeof(GCObject) + size);
-    if (!obj) return NULL;
-
-    memset(obj, 0, sizeof(GCObject) + size);
-    obj->size      = size;
-    obj->scan_fn   = scan_fn;
-    obj->dtor_fn   = dtor_fn;
-    obj->gray_next = NULL;
-    obj->dead      = 0;
-
-    // 新对象在增量标记进行中时直接标黑（保守策略：不会被当前周期收集）
-    // 空闲时为白色，下一轮标记会正确处理
-    if (gc.phase != GC_PHASE_IDLE) {
-        obj->color = GC_BLACK;
-    } else {
-        obj->color = GC_WHITE;
+    GCObject* o = (GCObject*)malloc(sizeof(GCObject) + size);
+    if (!o) {
+        pthread_mutex_unlock(&gc_lock);
+        return NULL;
     }
 
-    obj->next    = gc.objects;
-    gc.objects   = obj;
+    memset(o, 0, sizeof(GCObject) + size);
+    o->size      = size;
+    o->scan_fn   = scan_fn;
+    o->dtor_fn   = dtor_fn;
+    o->gray_next = NULL;
+    o->dead      = 0;
+
+    if (gc.phase != GC_PHASE_IDLE) {
+        o->color = GC_BLACK;
+    } else {
+        o->color = GC_WHITE;
+    }
+
+    o->next    = gc.objects;
+    gc.objects = o;
 
     gc.bytes_allocated += sizeof(GCObject) + size;
     gc.object_count++;
 
-    return get_user_ptr(obj);
+    void* result = get_user_ptr(o);
+    pthread_mutex_unlock(&gc_lock);
+    return result;
 }
 
-// ===== 注册根（兼容接口：push 到根栈） =====
+// ===== 兼容接口 =====
 void l25_gc_add_root(void** root) {
-    if (l25_gc_root_sp < L25_ROOT_STACK_MAX) {
-        l25_gc_root_stack[l25_gc_root_sp++] = (void*)root;
-    }
+    l25_gc_root_push(root);
 }
 
-// ===== 移除根（兼容接口：LIFO pop） =====
 void l25_gc_remove_root(void** root) {
-    // 快速路径：LIFO 顺序，栈顶即为目标
-    if (l25_gc_root_sp > 0 && l25_gc_root_stack[l25_gc_root_sp - 1] == (void*)root) {
-        l25_gc_root_sp--;
-        return;
-    }
-    // 慢速路径：从栈顶向下搜索（极少触发）
-    for (int32_t i = l25_gc_root_sp - 1; i >= 0; i--) {
-        if (l25_gc_root_stack[i] == (void*)root) {
-            l25_gc_root_stack[i] = l25_gc_root_stack[--l25_gc_root_sp];
-            return;
-        }
-    }
+    l25_gc_root_pop();
 }
 
-// ===== 确定性析构并释放（delete 语句） =====
+// ===== 确定性析构并释放（delete 语句，线程安全） =====
 void l25_gc_free(void* ptr) {
     if (!ptr) return;
+
+    pthread_mutex_lock(&gc_lock);
+
     GCObject* obj = get_header(ptr);
 
     // 调用析构器（如果尚未调用）
@@ -361,7 +427,7 @@ void l25_gc_free(void* ptr) {
         gc.sweep_cursor = obj->next;
     }
 
-    // 从灰色队列中移除（如果对象正在标记周期中）
+    // 从灰色队列中移除
     if (obj->color == GC_GRAY) {
         if (gc.gray_list == obj) {
             gc.gray_list = obj->gray_next;
@@ -375,28 +441,33 @@ void l25_gc_free(void* ptr) {
         }
     }
 
-    // 扫描根栈：将所有指向此对象的 slot 置 null，避免悬挂指针被 GC 追踪
-    for (int32_t i = 0; i < l25_gc_root_sp; i++) {
-        void** slot = (void**)l25_gc_root_stack[i];
-        if (*slot == ptr) {
-            *slot = NULL;
+    // 扫描所有线程根栈：将指向此对象的 slot 置 null
+    for (int t = 0; t < all_roots_count; t++) {
+        ThreadRootStack* rs = all_roots[t];
+        if (!rs) continue;
+        for (int32_t i = 0; i < rs->sp; i++) {
+            void** slot = (void**)rs->stack[i];
+            if (*slot == ptr) {
+                *slot = NULL;
+            }
         }
     }
 
-    // 更新统计
     gc.bytes_allocated -= (sizeof(GCObject) + obj->size);
     gc.object_count--;
 
-    // 立即释放内存
     free(obj);
+
+    pthread_mutex_unlock(&gc_lock);
 }
 
-// ===== 写屏障 =====
-// Dijkstra-style: 在增量标记期间，当指针字段被赋予新值时，
-// 将新值对象标灰，防止已被黑色对象引用的白色对象被遗漏（丢失更新）。
+// ===== 写屏障（线程安全） =====
 void l25_gc_write_barrier(void* new_ptr) {
-    if (gc.phase != GC_PHASE_MARKING) return;
     if (!new_ptr) return;
-    GCObject* obj = get_header(new_ptr);
-    shade_gray(obj);
+    pthread_mutex_lock(&gc_lock);
+    if (gc.phase == GC_PHASE_MARKING) {
+        GCObject* obj = get_header(new_ptr);
+        shade_gray(obj);
+    }
+    pthread_mutex_unlock(&gc_lock);
 }

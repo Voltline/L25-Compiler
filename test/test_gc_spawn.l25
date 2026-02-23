@@ -1,0 +1,34 @@
+// 验证 spawn 块内可以安全使用 new（GC 线程安全）
+program gc_spawn_test {
+    class Counter {
+        let value: int;
+        func getValue() {
+            return this.value;
+        }
+    }
+
+    main {
+        let ch: channel<int>;
+        let sum: int = 0;
+
+        spawn {
+            let c: Counter;
+            c.value = 42;
+            let v: int = c.getValue();
+            ch.send(v);
+        };
+
+        spawn {
+            let c: Counter;
+            c.value = 100;
+            let v: int = c.getValue();
+            ch.send(v);
+        };
+
+        let a: int = ch.recv();
+        let b: int = ch.recv();
+
+        sum = a + b;
+        output(sum);
+    }
+}
