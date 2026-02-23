@@ -873,6 +873,26 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             }
             return;
         }
+        if (targetType.kind == SymbolKind::String) {
+            const std::string& mname = methodCall->method->ident;
+            size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
+            // 合法方法: substr(2), find(1), char_at(1), to_upper(0), to_lower(0), replace(2), contains(1)
+            if (mname == "substr" && argCount == 2) { /* ok */ }
+            else if (mname == "find" && argCount == 1) { /* ok */ }
+            else if (mname == "char_at" && argCount == 1) { /* ok */ }
+            else if (mname == "to_upper" && argCount == 0) { /* ok */ }
+            else if (mname == "to_lower" && argCount == 0) { /* ok */ }
+            else if (mname == "replace" && argCount == 2) { /* ok */ }
+            else if (mname == "contains" && argCount == 1) { /* ok */ }
+            else {
+                reportError(*methodCall, "string 不存在方法或参数数量不匹配：" + mname);
+                return;
+            }
+            if (methodCall->args) {
+                for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+            }
+            return;
+        }
 
         if (targetType.pointerLevel > 0 && targetType.kind == SymbolKind::Class) {
             targetType.pointerLevel -= 1;

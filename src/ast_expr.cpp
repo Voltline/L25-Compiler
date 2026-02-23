@@ -1146,6 +1146,102 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
         return nullptr;
     }
 
+    // ===== 字符串方法调用分发 =====
+    if (baseType.kind == SymbolKind::String) {
+        ensureStringRuntimeDeclared(ctx);
+        // 获取字符串 { i32 len, i8* data } 值
+        llvm::Value* strVal = target->codeGen(ctx);
+        if (!strVal) { reportError("字符串变量无效"); return nullptr; }
+
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+        auto* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
+        auto* i32PtrTy = llvm::PointerType::get(i32Ty, 0);
+
+        llvm::Value* strLen  = ctx.builder.CreateExtractValue(strVal, 0, "str.len");
+        llvm::Value* strData = ctx.builder.CreateExtractValue(strVal, 1, "str.data");
+
+        const std::string& mname = method->ident;
+
+        auto getArgVal = [&](int idx) -> llvm::Value* {
+            return args->args[idx]->codeGen(ctx);
+        };
+
+        // Helper: build a new __l25_string from {newLen, newData}
+        auto buildString = [&](llvm::Value* newLen, llvm::Value* newData) -> llvm::Value* {
+            llvm::StructType* strTy = getL25StringType(ctx.context);
+            llvm::Value* result = llvm::UndefValue::get(strTy);
+            result = ctx.builder.CreateInsertValue(result, newLen, 0, "str.set.len");
+            result = ctx.builder.CreateInsertValue(result, newData, 1, "str.set.data");
+            return result;
+        };
+
+        if (mname == "substr") {
+            // substr(pos: int, len: int) -> string
+            llvm::Value* pos = castValueToType(getArgVal(0), i32Ty, ctx);
+            llvm::Value* subLen = castValueToType(getArgVal(1), i32Ty, ctx);
+            llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "substr.outlen");
+            llvm::Function* fn = ctx.module.getFunction("l25_string_substr");
+            llvm::Value* newData = ctx.builder.CreateCall(fn, {strData, strLen, pos, subLen, outLen}, "substr.data");
+            llvm::Value* newLen = ctx.builder.CreateLoad(i32Ty, outLen, "substr.len");
+            return buildString(newLen, newData);
+        }
+        if (mname == "find") {
+            // find(target: string) -> int
+            llvm::Value* argVal = getArgVal(0);
+            llvm::Value* needleData = ctx.builder.CreateExtractValue(argVal, 1, "find.needle.data");
+            llvm::Value* needleLen  = ctx.builder.CreateExtractValue(argVal, 0, "find.needle.len");
+            llvm::Function* fn = ctx.module.getFunction("l25_string_find");
+            return ctx.builder.CreateCall(fn, {strData, strLen, needleData, needleLen}, "find.result");
+        }
+        if (mname == "char_at") {
+            // char_at(index: int) -> int
+            llvm::Value* index = castValueToType(getArgVal(0), i32Ty, ctx);
+            llvm::Function* fn = ctx.module.getFunction("l25_string_char_at");
+            return ctx.builder.CreateCall(fn, {strData, strLen, index}, "char_at.result");
+        }
+        if (mname == "to_upper") {
+            // to_upper() -> string
+            llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "toupper.outlen");
+            llvm::Function* fn = ctx.module.getFunction("l25_string_to_upper");
+            llvm::Value* newData = ctx.builder.CreateCall(fn, {strData, strLen, outLen}, "toupper.data");
+            llvm::Value* newLen = ctx.builder.CreateLoad(i32Ty, outLen, "toupper.len");
+            return buildString(newLen, newData);
+        }
+        if (mname == "to_lower") {
+            // to_lower() -> string
+            llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "tolower.outlen");
+            llvm::Function* fn = ctx.module.getFunction("l25_string_to_lower");
+            llvm::Value* newData = ctx.builder.CreateCall(fn, {strData, strLen, outLen}, "tolower.data");
+            llvm::Value* newLen = ctx.builder.CreateLoad(i32Ty, outLen, "tolower.len");
+            return buildString(newLen, newData);
+        }
+        if (mname == "replace") {
+            // replace(old: string, new: string) -> string
+            llvm::Value* oldVal = getArgVal(0);
+            llvm::Value* newVal = getArgVal(1);
+            llvm::Value* oldData = ctx.builder.CreateExtractValue(oldVal, 1, "replace.old.data");
+            llvm::Value* oldLen  = ctx.builder.CreateExtractValue(oldVal, 0, "replace.old.len");
+            llvm::Value* newData = ctx.builder.CreateExtractValue(newVal, 1, "replace.new.data");
+            llvm::Value* newLen  = ctx.builder.CreateExtractValue(newVal, 0, "replace.new.len");
+            llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "replace.outlen");
+            llvm::Function* fn = ctx.module.getFunction("l25_string_replace");
+            llvm::Value* resultData = ctx.builder.CreateCall(fn,
+                {strData, strLen, oldData, oldLen, newData, newLen, outLen}, "replace.data");
+            llvm::Value* resultLen = ctx.builder.CreateLoad(i32Ty, outLen, "replace.len");
+            return buildString(resultLen, resultData);
+        }
+        if (mname == "contains") {
+            // contains(target: string) -> int
+            llvm::Value* argVal = getArgVal(0);
+            llvm::Value* needleData = ctx.builder.CreateExtractValue(argVal, 1, "contains.needle.data");
+            llvm::Value* needleLen  = ctx.builder.CreateExtractValue(argVal, 0, "contains.needle.len");
+            llvm::Function* fn = ctx.module.getFunction("l25_string_contains");
+            return ctx.builder.CreateCall(fn, {strData, strLen, needleData, needleLen}, "contains.result");
+        }
+        reportError("未知的字符串方法：" + mname);
+        return nullptr;
+    }
+
     // ===== 类方法调用（原逻辑）=====
     llvm::Value* baseValue = nullptr;
     if (auto ident = dynamic_cast<IdentExpr*>(target.get())) {

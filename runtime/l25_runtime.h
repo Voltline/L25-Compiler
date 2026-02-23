@@ -77,6 +77,16 @@ void    l25_thread_pool_init(void);
 void    l25_thread_spawn(void (*fn)(void*), void* arg);
 void    l25_thread_pool_shutdown(void);
 
+/* ===== String API ===== */
+
+char*   l25_string_substr(const char* data, int32_t data_len, int32_t pos, int32_t sub_len, int32_t* out_len);
+int32_t l25_string_find(const char* haystack, int32_t h_len, const char* needle, int32_t n_len);
+int32_t l25_string_char_at(const char* data, int32_t data_len, int32_t index);
+char*   l25_string_to_upper(const char* data, int32_t data_len, int32_t* out_len);
+char*   l25_string_to_lower(const char* data, int32_t data_len, int32_t* out_len);
+char*   l25_string_replace(const char* data, int32_t data_len, const char* old_s, int32_t old_len, const char* new_s, int32_t new_len, int32_t* out_len);
+int32_t l25_string_contains(const char* haystack, int32_t h_len, const char* needle, int32_t n_len);
+
 /* ===== Clock API ===== */
 
 float   l25_clock_ms(void);  /* CLOCK_MONOTONIC 毫秒数 */

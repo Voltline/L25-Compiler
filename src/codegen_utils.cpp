@@ -57,6 +57,47 @@ void ensureStringRuntimeDeclared(CodeGenContext& ctx) {
         ctx.module.getOrInsertFunction("snprintf",
             llvm::FunctionType::get(i32Ty, { i8PtrTy, i64Ty, i8PtrTy }, true));
     }
+
+    // ===== String method runtime functions =====
+    auto* i8PtrPtrTy = llvm::PointerType::get(i32Ty, 0);  // actually i32* for out_len
+    // We use i32* for out_len parameter
+    auto* i32PtrTy = llvm::PointerType::get(i32Ty, 0);
+
+    // l25_string_substr(data: i8*, data_len: i32, pos: i32, sub_len: i32, out_len: i32*) -> i8*
+    if (!ctx.module.getFunction("l25_string_substr")) {
+        ctx.module.getOrInsertFunction("l25_string_substr",
+            llvm::FunctionType::get(i8PtrTy, { i8PtrTy, i32Ty, i32Ty, i32Ty, i32PtrTy }, false));
+    }
+    // l25_string_find(haystack: i8*, h_len: i32, needle: i8*, n_len: i32) -> i32
+    if (!ctx.module.getFunction("l25_string_find")) {
+        ctx.module.getOrInsertFunction("l25_string_find",
+            llvm::FunctionType::get(i32Ty, { i8PtrTy, i32Ty, i8PtrTy, i32Ty }, false));
+    }
+    // l25_string_char_at(data: i8*, data_len: i32, index: i32) -> i32
+    if (!ctx.module.getFunction("l25_string_char_at")) {
+        ctx.module.getOrInsertFunction("l25_string_char_at",
+            llvm::FunctionType::get(i32Ty, { i8PtrTy, i32Ty, i32Ty }, false));
+    }
+    // l25_string_to_upper(data: i8*, data_len: i32, out_len: i32*) -> i8*
+    if (!ctx.module.getFunction("l25_string_to_upper")) {
+        ctx.module.getOrInsertFunction("l25_string_to_upper",
+            llvm::FunctionType::get(i8PtrTy, { i8PtrTy, i32Ty, i32PtrTy }, false));
+    }
+    // l25_string_to_lower(data: i8*, data_len: i32, out_len: i32*) -> i8*
+    if (!ctx.module.getFunction("l25_string_to_lower")) {
+        ctx.module.getOrInsertFunction("l25_string_to_lower",
+            llvm::FunctionType::get(i8PtrTy, { i8PtrTy, i32Ty, i32PtrTy }, false));
+    }
+    // l25_string_replace(data, data_len, old, old_len, new, new_len, out_len) -> i8*
+    if (!ctx.module.getFunction("l25_string_replace")) {
+        ctx.module.getOrInsertFunction("l25_string_replace",
+            llvm::FunctionType::get(i8PtrTy, { i8PtrTy, i32Ty, i8PtrTy, i32Ty, i8PtrTy, i32Ty, i32PtrTy }, false));
+    }
+    // l25_string_contains(haystack, h_len, needle, n_len) -> i32
+    if (!ctx.module.getFunction("l25_string_contains")) {
+        ctx.module.getOrInsertFunction("l25_string_contains",
+            llvm::FunctionType::get(i32Ty, { i8PtrTy, i32Ty, i8PtrTy, i32Ty }, false));
+    }
 }
 
 // ===== 内部工具函数 =====
@@ -419,6 +460,14 @@ TypeInfo evaluateExprType(const Expr* expr)
                 return sym ? getContainerElemType(sym) : TypeInfo{ SymbolKind::Int, {}, 0 };
             }
             if (mname == "len") return TypeInfo{ SymbolKind::Int, {}, 0 };
+            return TypeInfo{ SymbolKind::Int, {}, 0 };
+        }
+        if (targetType.kind == SymbolKind::String) {
+            const std::string& mname = methodCall->method->ident;
+            if (mname == "substr" || mname == "to_upper" || mname == "to_lower" || mname == "replace") {
+                return TypeInfo{ SymbolKind::String, {}, 0, false };
+            }
+            // find, char_at, contains all return int
             return TypeInfo{ SymbolKind::Int, {}, 0 };
         }
         std::string className = targetType.className;

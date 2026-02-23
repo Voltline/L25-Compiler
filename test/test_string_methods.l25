@@ -1,0 +1,55 @@
+program test_string_methods {
+    main {
+        let s = "Hello, World!";
+
+        // 测试 substr
+        let sub = s.substr(0, 5);
+        printf("%s\n", sub);           // Hello
+
+        let sub2 = s.substr(7, 5);
+        printf("%s\n", sub2);          // World
+
+        // 测试 find
+        let pos = s.find("World");
+        output(pos);                   // 7
+
+        let pos2 = s.find("xyz");
+        output(pos2);                  // -1
+
+        // 测试 char_at
+        let ch = s.char_at(0);
+        output(ch);                    // 72 (ASCII 'H')
+
+        let ch2 = s.char_at(7);
+        output(ch2);                   // 87 (ASCII 'W')
+
+        // 测试 to_upper
+        let upper = s.to_upper();
+        printf("%s\n", upper);         // HELLO, WORLD!
+
+        // 测试 to_lower
+        let lower = s.to_lower();
+        printf("%s\n", lower);         // hello, world!
+
+        // 测试 replace
+        let r = s.replace("World", "L25");
+        printf("%s\n", r);            // Hello, L25!
+
+        let r2 = s.replace("xyz", "abc");
+        printf("%s\n", r2);           // Hello, World!  (no match, unchanged)
+
+        // 测试 contains
+        let c1 = s.contains("World");
+        output(c1);                    // 1
+
+        let c2 = s.contains("xyz");
+        output(c2);                    // 0
+
+        // 测试链式调用
+        let chain = "foobar".substr(0, 3).to_upper();
+        printf("%s\n", chain);        // FOO
+
+        // 测试 strlen 仍然工作
+        output(strlen(s));             // 13
+    }
+}

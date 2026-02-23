@@ -564,6 +564,27 @@ program select_demo {
 ```
 &emsp; `select { ... }` multiplexes over multiple channel operations, Go-style. Each `case` is either a `recv` (`case val = ch.recv(): { ... }`) or a `send` (`case ch.send(expr): { ... }`). An optional `default` branch runs when no channel operation is immediately ready. Without `default`, the statement spins (with `sched_yield`) until one case succeeds. Only buffered channels support non-blocking `try_send`/`try_recv`; unbuffered channels should be used with a `default` branch to avoid spinning indefinitely.
 
+* 🔤 *String methods*:
+```L25
+program string_methods {
+    main {
+        let s = "Hello, World!";
+
+        let sub = s.substr(0, 5);     // "Hello"
+        let pos = s.find("World");    // 7
+        let ch  = s.char_at(0);       // 72 (ASCII 'H')
+        let has = s.contains("World");// 1
+        let up  = s.to_upper();       // "HELLO, WORLD!"
+        let lo  = s.to_lower();       // "hello, world!"
+        let r   = s.replace("World", "L25");  // "Hello, L25!"
+
+        printf("%s %d %d %d\n", sub, pos, ch, has);
+        printf("%s\n%s\n%s\n", up, lo, r);
+    }
+}
+```
+&emsp; Strings support the following methods: `substr(pos, len)` extracts a substring (returns a new string); `find(target)` returns the index of the first occurrence of a substring (-1 if not found); `char_at(index)` returns the ASCII value of the character at the given index; `contains(target)` returns 1 if the string contains the substring, 0 otherwise; `to_upper()` and `to_lower()` return case-converted copies; `replace(old, new)` replaces the first occurrence of `old` with `new` (returns a new string). All methods that return strings allocate new buffers via `malloc`. The existing `strlen(s)` built-in function continues to work alongside these methods.
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -1064,6 +1085,7 @@ L25-Compiler/
 │   ├── l25_queue.c
 │   ├── l25_runtime.h
 │   ├── l25_stdlib.c
+│   ├── l25_string.c
 │   ├── l25_thread.c
 │   └── l25_vector.c
 ├── src
