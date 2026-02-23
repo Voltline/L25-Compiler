@@ -390,6 +390,61 @@ program concurrency {
 ```
 &emsp; `spawn { ... }` launches a block on a thread pool (auto-sized to CPU cores, 2–16 workers). Captured variables are copied by value (strings are deep-copied). `channel<T>` (default capacity 1) or `channel<T, N>` (buffered with capacity N) provides type-safe inter-goroutine communication. Channels support `send(val)`, `recv()`, `len()`, and `close()` methods. The thread pool waits for all spawned tasks before main exits. Channels are automatically freed by RAII.
 
+* 🖨️ *C-style formatted I/O with `printf` and `scanf`*:
+```L25
+program io_demo {
+    main {
+        let x: int = 42;
+        let y: float = 3.14;
+        let s: string = "hello";
+
+        // C-style formatted output
+        printf("%d\n", x);
+        printf("%f\n", y);
+        printf("%s world\n", s);
+        printf("x=%d, y=%f, s=%s\n", x, y, s);
+
+        // C-style formatted input — variables are passed directly;
+        // the compiler automatically takes their address internally
+        let a: int = 0;
+        let b: int = 0;
+        scanf("%d %d", a, b);
+        printf("a=%d, b=%d, sum=%d\n", a, b, a + b);
+    }
+}
+```
+&emsp; `printf(fmt, args...)` provides C-style formatted output. L25 `string` values are automatically unwrapped to `char*`, and `float` values are promoted to `double` as required by the C variadic ABI. `scanf(fmt, vars...)` provides C-style formatted input; the first argument is the format string, and subsequent arguments must be variables or array elements (the compiler automatically takes their address). The original `output`/`input` statements are preserved and unaffected.
+
+* 🔬 *GC Monitoring API*:
+```L25
+program gc_monitor {
+    class Node {
+        let value: int;
+    }
+
+    main {
+        output(gc_count());          // number of GC-managed objects
+        output(gc_bytes());          // bytes currently tracked by GC
+        output(gc_threshold());      // current GC trigger threshold
+
+        let a: *Node = new Node();
+        a.value = 1;
+        output(gc_count());          // 1
+
+        output(gc_total_allocs());       // total allocations since program start
+        output(gc_total_collections());  // total GC cycles run
+        output(gc_total_freed());        // total objects freed by GC
+
+        gc_stats();          // print detailed stats to stderr
+        gc_pause();          // pause automatic incremental GC
+        gc_resume();         // resume automatic incremental GC
+        gc_collect();        // manually trigger a full GC cycle
+        gc_set_threshold(512); // set GC trigger threshold (bytes)
+    }
+}
+```
+&emsp; All GC monitoring functions are registered as built-in functions and can be called like ordinary functions. Query functions (`gc_count`, `gc_bytes`, `gc_threshold`, `gc_total_allocs`, `gc_total_collections`, `gc_total_freed`) return `int`. Action functions (`gc_stats`, `gc_pause`, `gc_resume`, `gc_collect`) and `gc_set_threshold(n)` return `void`. `gc_stats()` writes a detailed statistics report (object count, bytes, threshold, phase, thread count, etc.) to `stderr`.
+
 * 🧾 *Procedures without explicit return values*:
 ```L25
 func log_message(msg) {
@@ -613,7 +668,17 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <invoke_stmt>
     | <nested_func_stmt>
     | <spawn_stmt>
+    | <printf_stmt>
+    | <scanf_stmt>
     | "break"
+
+<printf_stmt> =
+    "printf" "(" <arg_list> ")"
+
+<scanf_stmt> =
+    "scanf" "(" <arg_list> ")"
+    // Note: semantic analysis enforces that arguments after the format
+    // string are lvalues (identifiers or array subscript expressions).
 
 <delete_stmt> =
     "delete" <expr>
@@ -897,11 +962,14 @@ L25-Compiler/
 │   ├── test_float.l25
 │   ├── test_for.l25
 │   ├── test_gc.l25
+│   ├── test_gc_monitor.l25
+│   ├── test_gc_spawn.l25
 │   ├── test_invoke.l25
 │   ├── test_logical.l25
 │   ├── test_map.l25
 │   ├── test_new_array.l25
 │   ├── test_pointer.l25
+│   ├── test_printf.l25
 │   ├── test_queue.l25
 │   ├── test_raii_class.l25
 │   ├── test_raii_func.l25
@@ -909,10 +977,12 @@ L25-Compiler/
 │   ├── test_raii_string.l25
 │   ├── test_reflection.l25
 │   ├── test_runtime_reflect.l25
+│   ├── test_scanf.l25
 │   ├── test_string.l25
 │   ├── test_break.l25
 │   ├── test_channel_capacity.l25
 │   ├── test_complex_concurrent.l25
+│   ├── test_cpu_occupy.l25
 │   ├── test_spawn.l25
 │   ├── test_spawn_fib.l25
 │   ├── test_spawn_multi.l25
