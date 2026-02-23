@@ -454,6 +454,61 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         if (loopDepth <= 0) {
             reportError(stmt, "break 语句只能在循环内使用");
         }
+    } else if (auto chanRecv = dynamic_cast<ChannelRecvStmt*>(&stmt)) {
+        // let val, ok = ch.recv();
+        // 检查 channel 表达式
+        analyzeExpr(*chanRecv->channel);
+        // 获取 channel 表达式的类型
+        if (auto chIdent = dynamic_cast<IdentExpr*>(chanRecv->channel.get())) {
+            SymbolInfo* chSym = currentScope->lookup(chIdent->ident);
+            if (chSym && chSym->kind == SymbolKind::Channel) {
+                chanRecv->channelTypeInfo = TypeInfo{ SymbolKind::Channel, {}, 0, false };
+                chanRecv->channelTypeInfo.typeParams = chSym->typeParams;
+            } else {
+                reportError(*chanRecv, "recv 双返回值需要 channel 类型");
+            }
+        }
+        // 声明 val 和 ok 变量
+        if (checkSameScopeSymbolExists(chanRecv->valName)) {
+            reportError(*chanRecv, "变量重定义：" + chanRecv->valName);
+        } else {
+            TypeInfo valType = chanRecv->channelTypeInfo.typeParams.empty()
+                                 ? TypeInfo{ SymbolKind::Int, {}, 0, false }
+                                 : chanRecv->channelTypeInfo.typeParams[0];
+            declareSymbol(chanRecv->valName, SymbolInfo{ chanRecv->valName, valType });
+        }
+        if (checkSameScopeSymbolExists(chanRecv->okName)) {
+            reportError(*chanRecv, "变量重定义：" + chanRecv->okName);
+        } else {
+            TypeInfo okType{ SymbolKind::Int, {}, 0, false };
+            declareSymbol(chanRecv->okName, SymbolInfo{ chanRecv->okName, okType });
+        }
+    } else if (auto forRange = dynamic_cast<ForRangeChannelStmt*>(&stmt)) {
+        // for val in ch { ... }
+        analyzeExpr(*forRange->channel);
+        // 获取 channel 类型信息
+        if (auto chIdent = dynamic_cast<IdentExpr*>(forRange->channel.get())) {
+            SymbolInfo* chSym = currentScope->lookup(chIdent->ident);
+            if (chSym && chSym->kind == SymbolKind::Channel) {
+                forRange->channelTypeInfo = TypeInfo{ SymbolKind::Channel, {}, 0, false };
+                forRange->channelTypeInfo.typeParams = chSym->typeParams;
+            } else {
+                reportError(*forRange, "for-in 需要 channel 类型");
+            }
+        }
+        enterScope();
+        forRange->loopBodyScope = currentScope;
+        // 声明 val 循环变量
+        TypeInfo valType = forRange->channelTypeInfo.typeParams.empty()
+                             ? TypeInfo{ SymbolKind::Int, {}, 0, false }
+                             : forRange->channelTypeInfo.typeParams[0];
+        declareSymbol(forRange->valName, SymbolInfo{ forRange->valName, valType });
+        loopDepth++;
+        for (auto& s : forRange->body->stmts) {
+            analyzeStmt(*s);
+        }
+        loopDepth--;
+        exitScope();
     }
 }
 
@@ -690,11 +745,12 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         if (targetType.kind == SymbolKind::Channel) {
             const std::string& mname = methodCall->method->ident;
             size_t argCount = methodCall->args ? methodCall->args->args.size() : 0;
-            // 合法方法: send(1), recv(0), len(0), close(0)
+            // 合法方法: send(1), recv(0), len(0), close(0), closed(0)
             if (mname == "send" && argCount == 1) { /* ok */ }
             else if (mname == "recv" && argCount == 0) { /* ok */ }
             else if (mname == "len" && argCount == 0) { /* ok */ }
             else if (mname == "close" && argCount == 0) { /* ok */ }
+            else if (mname == "closed" && argCount == 0) { /* ok */ }
             else {
                 reportError(*methodCall, "channel 不存在方法或参数数量不匹配：" + mname);
                 return;

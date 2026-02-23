@@ -63,6 +63,7 @@ ident {letter}({letter}|[0-9])*
 "queue"     { updateLocationAndColumn(); return QUEUE; }
 "channel"   { updateLocationAndColumn(); return CHANNEL; }
 "spawn"     { updateLocationAndColumn(); return SPAWN; }
+"in"        { updateLocationAndColumn(); return IN; }
 "printf"    { updateLocationAndColumn(); return PRINTF; }
 "scanf"     { updateLocationAndColumn(); return SCANF; }
 

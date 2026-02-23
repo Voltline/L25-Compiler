@@ -1,0 +1,18 @@
+program test_channel_unbuffered {
+    main {
+        // 测试无缓冲 channel（同步 rendezvous）
+        let ch: channel<int>;
+
+        spawn {
+            ch.send(42);
+            ch.send(100);
+        };
+
+        let a: int = ch.recv();
+        let b: int = ch.recv();
+
+        output(a);
+        output(b);
+        output(a + b);
+    }
+}

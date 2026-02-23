@@ -1092,6 +1092,10 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
                 llvm::FunctionCallee fn = ctx.module.getFunction("l25_channel_close");
                 ctx.builder.CreateCall(fn, {containerPtr});
                 return llvm::ConstantInt::get(i32Ty, 0);
+            } else if (mname == "closed") {
+                llvm::FunctionCallee fn = ctx.module.getFunction("l25_channel_closed");
+                llvm::Value* result = ctx.builder.CreateCall(fn, {containerPtr}, "ch.closed");
+                return result;
             }
         }
         reportError("未知的容器方法：" + mname);

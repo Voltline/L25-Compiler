@@ -1,0 +1,26 @@
+program test_channel_closed {
+    main {
+        // 测试 ch.closed() 方法
+        let ch: channel<int, 2>;
+        output(ch.closed());
+        ch.send(10);
+        ch.send(20);
+        output(ch.closed());
+        ch.close();
+        output(ch.closed());
+
+        // 从已关闭的 channel 接收剩余数据
+        let a, ok1 = ch.recv();
+        output(a);
+        output(ok1);
+
+        let b, ok2 = ch.recv();
+        output(b);
+        output(ok2);
+
+        // 已关闭且空的 channel recv → ok=0, val=0
+        let c, ok3 = ch.recv();
+        output(c);
+        output(ok3);
+    }
+}

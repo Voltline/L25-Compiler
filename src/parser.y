@@ -7,6 +7,8 @@
 struct ClassMemberAggregate;
 struct SpawnStmt;
 struct BreakStmt;
+struct ChannelRecvStmt;
+struct ForRangeChannelStmt;
 }
 
 %{
@@ -95,6 +97,8 @@ extern Program* rootProgram;
 %type <stmt> if_stmt
 %type <stmt> while_stmt
 %type <stmt> for_stmt
+%type <stmt> channel_recv_stmt
+%type <stmt> for_range_channel_stmt
 %type <stmt> input_stmt
 %type <stmt> output_stmt
 %type <stmt> printf_stmt
@@ -125,7 +129,7 @@ extern Program* rootProgram;
 
 %token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
-%token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN
+%token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN IN
 %token PRINTF SCANF
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
@@ -429,7 +433,7 @@ input_arg_list:
     ;
 
 stmt:
-    declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | input_stmt | output_stmt | printf_stmt | scanf_stmt
+    declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | for_range_channel_stmt | channel_recv_stmt | input_stmt | output_stmt | printf_stmt | scanf_stmt
     | BREAK
     {
         $$ = new BreakStmt();
@@ -632,6 +636,37 @@ for_stmt:
         };
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
+    }
+    ;
+
+/* channel recv 双返回值: let val, ok = ch.recv(); */
+channel_recv_stmt:
+    LET IDENT COMMA IDENT ASSIGN factor DOT IDENT LPAREN RPAREN
+    {
+        if (std::string(*$8) != "recv") {
+            yyerror("channel 双返回值语法仅支持 recv 方法");
+            YYERROR;
+        }
+        $$ = new ChannelRecvStmt(*$2, *$4, std::unique_ptr<Expr>($6));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+        delete $4;
+        delete $8;
+    }
+    ;
+
+/* range-for channel: for val in ch { ... } */
+for_range_channel_stmt:
+    FOR IDENT IN IDENT LBRACE stmt_list RBRACE
+    {
+        auto* chExpr = new IdentExpr(*$4);
+        $$ = new ForRangeChannelStmt(*$2, std::unique_ptr<Expr>(chExpr),
+                                     std::unique_ptr<StmtList>($6));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+        delete $4;
     }
     ;
 

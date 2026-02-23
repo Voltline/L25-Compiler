@@ -64,8 +64,10 @@ void*   l25_channel_create(int64_t elem_size, int64_t capacity);
 void    l25_channel_destroy(void* ch);
 void    l25_channel_send(void* ch, const void* elem);
 void    l25_channel_recv(void* ch, void* out_elem);
+int32_t l25_channel_recv_ok(void* ch, void* out_elem); /* 返回 ok: 1=成功, 0=已关闭且空 */
 int64_t l25_channel_len(void* ch);
 void    l25_channel_close(void* ch);
+int32_t l25_channel_closed(void* ch); /* 返回 1=已关闭, 0=未关闭 */
 
 /* ===== Thread Pool API ===== */
 

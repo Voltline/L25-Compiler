@@ -137,7 +137,7 @@ llvm::Value* DeclareStmt::codeGen(CodeGenContext& ctx) const
         TypeInfo elemType = typeInfo.typeParams.empty() ? TypeInfo{ SymbolKind::Int, {}, 0 } : typeInfo.typeParams[0];
         uint64_t elemSize = getTypeAllocSize(elemType, ctx);
         llvm::Value* elemSizeVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), elemSize);
-        int cap = typeInfo.channelCapacity > 0 ? typeInfo.channelCapacity : 1;
+        int cap = typeInfo.channelCapacity; // 0 = 无缓冲 (同步 rendezvous)
         llvm::Value* capVal = llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx.context), cap);
         llvm::FunctionCallee createFn = ctx.module.getOrInsertFunction("l25_channel_create",
             llvm::FunctionType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
@@ -553,6 +553,163 @@ llvm::Value* BreakStmt::codeGen(CodeGenContext& ctx) const
     llvm::BasicBlock* deadBlock = llvm::BasicBlock::Create(ctx.context, "break.dead", func);
     ctx.builder.SetInsertPoint(deadBlock);
     ctx.currentBlock = deadBlock;
+    return nullptr;
+}
+
+// ===== Channel Recv 双返回值语句 =====
+ChannelRecvStmt::ChannelRecvStmt(const std::string& valName, const std::string& okName,
+                                 std::unique_ptr<Expr> channel)
+    : valName(valName), okName(okName), channel(std::move(channel)) {}
+
+void ChannelRecvStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "ChannelRecv: " << valName << ", " << okName << std::endl;
+    channel->print(indent + 2);
+}
+
+llvm::Value* ChannelRecvStmt::codeGen(CodeGenContext& ctx) const
+{
+    ensureContainerRuntimeDeclared(ctx);
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
+
+    // 获取 channel 指针
+    llvm::Value* chPtr = channel->codeGen(ctx);
+
+    // 确定元素类型
+    TypeInfo elemType = channelTypeInfo.typeParams.empty()
+                          ? TypeInfo{ SymbolKind::Int, {}, 0, false }
+                          : channelTypeInfo.typeParams[0];
+    llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+    // 分配输出缓冲
+    llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "ch.recv.out");
+    llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+
+    // 调用 l25_channel_recv_ok
+    llvm::FunctionCallee recvOkFn = ctx.module.getFunction("l25_channel_recv_ok");
+    llvm::Value* okVal = ctx.builder.CreateCall(recvOkFn, {chPtr, outCast}, "ch.recv.ok");
+
+    // 获取值
+    llvm::Value* valVal = ctx.builder.CreateLoad(elemLLVMTy, out, "ch.recv.val");
+
+    // 声明并初始化 val 变量
+    SymbolInfo* valSym = scope->lookupLocal(valName);
+    llvm::AllocaInst* valAlloca = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, valName);
+    ctx.builder.CreateStore(valVal, valAlloca);
+    if (valSym) valSym->addr = valAlloca;
+
+    // 注册 GC 根（如果是指针类型）
+    if (elemType.pointerLevel > 0 || elemType.kind == SymbolKind::Class) {
+        auto* gcPushFn = ctx.module.getFunction("l25_gc_root_push");
+        if (gcPushFn) {
+            llvm::Value* slotCast = ctx.builder.CreateBitCast(valAlloca,
+                llvm::PointerType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0), 0));
+            ctx.builder.CreateCall(gcPushFn, {slotCast});
+            ctx.registerCleanup(valAlloca, CleanupKind::GCRoot);
+        }
+    }
+
+    // 声明并初始化 ok 变量
+    SymbolInfo* okSym = scope->lookupLocal(okName);
+    llvm::AllocaInst* okAlloca = ctx.builder.CreateAlloca(i32Ty, nullptr, okName);
+    ctx.builder.CreateStore(okVal, okAlloca);
+    if (okSym) okSym->addr = okAlloca;
+
+    return nullptr;
+}
+
+// ===== ForRangeChannel 语句 =====
+ForRangeChannelStmt::ForRangeChannelStmt(const std::string& valName,
+                                         std::unique_ptr<Expr> channel,
+                                         std::unique_ptr<StmtList> body)
+    : valName(valName), channel(std::move(channel)), body(std::move(body)) {}
+
+void ForRangeChannelStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "ForRangeChannel: " << valName << std::endl;
+    channel->print(indent + 2);
+    body->print(indent + 2);
+}
+
+llvm::Value* ForRangeChannelStmt::codeGen(CodeGenContext& ctx) const
+{
+    ensureContainerRuntimeDeclared(ctx);
+    llvm::Function* function = ctx.builder.GetInsertBlock()->getParent();
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
+
+    // 获取 channel 指针
+    llvm::Value* chPtr = channel->codeGen(ctx);
+
+    // 确定元素类型
+    TypeInfo elemType = channelTypeInfo.typeParams.empty()
+                          ? TypeInfo{ SymbolKind::Int, {}, 0, false }
+                          : channelTypeInfo.typeParams[0];
+    llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+    // 为循环变量分配栈空间（在循环外，便于循环体内使用）
+    llvm::AllocaInst* valAlloca = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, valName);
+    llvm::AllocaInst* recvOut   = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "ch.range.out");
+
+    // 获取 loopBodyScope 并设置 val 变量的 addr
+    SymbolInfo* valSym = loopBodyScope->lookupLocal(valName);
+    if (valSym) valSym->addr = valAlloca;
+
+    // 注册 GC 根（如果是指针类型）
+    if (elemType.pointerLevel > 0 || elemType.kind == SymbolKind::Class) {
+        auto* gcPushFn = ctx.module.getFunction("l25_gc_root_push");
+        if (gcPushFn) {
+            llvm::Value* slotCast = ctx.builder.CreateBitCast(valAlloca,
+                llvm::PointerType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0), 0));
+            ctx.builder.CreateCall(gcPushFn, {slotCast});
+            ctx.registerCleanup(valAlloca, CleanupKind::GCRoot);
+        }
+    }
+
+    // 创建基本块
+    llvm::BasicBlock* condBlock  = llvm::BasicBlock::Create(ctx.context, "forch.cond", function);
+    llvm::BasicBlock* bodyBlock  = llvm::BasicBlock::Create(ctx.context, "forch.body", function);
+    llvm::BasicBlock* afterBlock = llvm::BasicBlock::Create(ctx.context, "forch.after", function);
+
+    ctx.builder.CreateBr(condBlock);
+
+    // condBlock: recv_ok → if !ok, break
+    ctx.builder.SetInsertPoint(condBlock);
+    ctx.currentBlock = condBlock;
+
+    llvm::Value* outCast = ctx.builder.CreateBitCast(recvOut, i8PtrTy);
+    llvm::FunctionCallee recvOkFn = ctx.module.getFunction("l25_channel_recv_ok");
+    llvm::Value* okVal = ctx.builder.CreateCall(recvOkFn, {chPtr, outCast}, "ch.range.ok");
+    llvm::Value* okBool = ctx.builder.CreateICmpNE(okVal, llvm::ConstantInt::get(i32Ty, 0), "ch.range.okbool");
+
+    // 将接收到的值存入循环变量
+    llvm::Value* recvVal = ctx.builder.CreateLoad(elemLLVMTy, recvOut, "ch.range.val");
+    ctx.builder.CreateStore(recvVal, valAlloca);
+
+    ctx.builder.CreateCondBr(okBool, bodyBlock, afterBlock);
+
+    // bodyBlock
+    ctx.builder.SetInsertPoint(bodyBlock);
+    ctx.currentBlock = bodyBlock;
+
+    ctx.breakTargets.push_back(afterBlock);
+    ctx.pushCleanupScope();
+    body->codeGen(ctx);
+
+    if (!ctx.currentBlock->getTerminator()) {
+        ctx.builder.SetInsertPoint(ctx.currentBlock);
+        emitScopeCleanup(ctx);
+        ctx.builder.CreateBr(condBlock);
+    } else {
+        ctx.popCleanupScope();
+    }
+    ctx.breakTargets.pop_back();
+
+    // afterBlock
+    ctx.builder.SetInsertPoint(afterBlock);
+    ctx.currentBlock = afterBlock;
+
     return nullptr;
 }
 

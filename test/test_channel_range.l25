@@ -1,0 +1,28 @@
+program test_channel_range {
+    main {
+        // 测试 for-range channel 与多 spawn producer
+        let ch: channel<int, 10>;
+        let done: channel<int>;
+
+        spawn {
+            let i: int = 0;
+            for (let j: int = 0; j < 10; j = j + 1) {
+                ch.send(j * j);
+            };
+            ch.close();
+            done.send(1);
+        };
+
+        // for-range 遍历 channel
+        let sum: int = 0;
+        for val in ch {
+            sum = sum + val;
+        };
+
+        // sum = 0+1+4+9+16+25+36+49+64+81 = 285
+        output(sum);
+
+        // 等待 spawn 完成
+        let d: int = done.recv();
+    }
+}

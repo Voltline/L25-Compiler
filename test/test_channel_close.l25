@@ -1,0 +1,28 @@
+program test_channel_close {
+    main {
+        // 测试 channel close + recv 双返回值 + for-range
+        let ch: channel<int, 4>;
+
+        spawn {
+            let i: int = 1;
+            for (let j: int = 0; j < 5; j = j + 1) {
+                ch.send(i);
+                i = i * 2;
+            };
+            ch.close();
+        };
+
+        // 测试 1: recv 双返回值
+        let val, ok = ch.recv();
+        output(val);
+        output(ok);
+
+        // 测试 2: for-range channel（读取剩余值直到 close）
+        let sum: int = val;
+        for v in ch {
+            sum = sum + v;
+            output(v);
+        };
+        output(sum);
+    }
+}

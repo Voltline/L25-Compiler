@@ -39,7 +39,7 @@ struct TypeInfo
     bool isFloat; // 是否为浮点类型
     std::string className; // 类名（仅用于类/类指针类型）
     std::vector<TypeInfo> typeParams; // 泛型参数（vector<int> → [Int], map<string,int> → [String, Int]）
-    int channelCapacity = 1; // channel 缓冲区容量（仅 Channel 类型使用）
+    int channelCapacity = 0; // channel 缓冲区容量（0 = 无缓冲，同步 rendezvous）
 
     TypeInfo();
     TypeInfo(SymbolKind kind, std::vector<int> dims, int pointerLevel = 0, bool isFloat = false, std::string className = "");

@@ -34,6 +34,8 @@ struct PrintfStmt;
 struct ScanfStmt;
 struct SpawnStmt;
 struct BreakStmt;
+struct ChannelRecvStmt;
+struct ForRangeChannelStmt;
 struct Expr;
 struct BoolExpr;
 struct NumberExpr;
@@ -422,6 +424,38 @@ struct DeleteStmt: public Stmt
 struct BreakStmt: public Stmt
 {
     BreakStmt() = default;
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// channel recv 双返回值语句: let val, ok = ch.recv();
+struct ChannelRecvStmt: public Stmt
+{
+    std::string valName;           // 值变量名
+    std::string okName;            // ok 变量名
+    std::unique_ptr<Expr> channel; // channel 表达式
+    TypeInfo channelTypeInfo;      // channel 的类型信息（用于确定元素类型）
+
+    ChannelRecvStmt(const std::string& valName, const std::string& okName,
+                    std::unique_ptr<Expr> channel);
+
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// range-for channel 语句: for val in ch { ... }
+struct ForRangeChannelStmt: public Stmt
+{
+    std::string valName;              // 循环变量名
+    std::unique_ptr<Expr> channel;    // channel 表达式
+    std::unique_ptr<StmtList> body;   // 循环体
+    TypeInfo channelTypeInfo;         // channel 的类型信息
+    Scope* loopBodyScope = nullptr;
+
+    ForRangeChannelStmt(const std::string& valName,
+                        std::unique_ptr<Expr> channel,
+                        std::unique_ptr<StmtList> body);
+
     void print(int indent = 0) const override;
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
