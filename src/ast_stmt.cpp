@@ -556,6 +556,50 @@ llvm::Value* BreakStmt::codeGen(CodeGenContext& ctx) const
     return nullptr;
 }
 
+// ===== Return语句节点 (早期 return) =====
+ReturnStmt::ReturnStmt(std::unique_ptr<Expr> value)
+    : value(std::move(value)) {}
+
+void ReturnStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "return" << std::endl;
+    if (value) value->print(indent + 2);
+}
+
+llvm::Value* ReturnStmt::codeGen(CodeGenContext& ctx) const
+{
+    if (!ctx.returnBlock || !ctx.retAlloca) {
+        reportError("return 语句只能在函数内使用");
+        return nullptr;
+    }
+
+    // 计算返回值
+    llvm::Value* retVal = nullptr;
+    if (value) {
+        retVal = value->codeGen(ctx);
+        if (!retVal) return nullptr;
+
+        // 类型适配：cast 到返回值 alloca 的类型
+        llvm::Type* retTy = ctx.retAlloca->getAllocatedType();
+        retVal = castValueToType(retVal, retTy, ctx);
+        ctx.builder.CreateStore(retVal, ctx.retAlloca);
+    }
+    // 如果无返回表达式，retAlloca 保持默认值
+
+    // 用 emitReturnCleanup 清理所有活跃作用域
+    emitReturnCleanup(ctx);
+
+    // 跳转到函数统一的 return block
+    ctx.builder.CreateBr(ctx.returnBlock);
+
+    // 创建 dead block 防止后续语句插入到已终结的块
+    llvm::Function* func = ctx.builder.GetInsertBlock()->getParent();
+    llvm::BasicBlock* deadBlock = llvm::BasicBlock::Create(ctx.context, "return.dead", func);
+    ctx.builder.SetInsertPoint(deadBlock);
+    ctx.currentBlock = deadBlock;
+    return nullptr;
+}
+
 // ===== Channel Recv 双返回值语句 =====
 ChannelRecvStmt::ChannelRecvStmt(const std::string& valName, const std::string& okName,
                                  std::unique_ptr<Expr> channel)

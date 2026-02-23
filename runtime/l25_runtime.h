@@ -79,6 +79,13 @@ void    l25_thread_pool_shutdown(void);
 
 float   l25_clock_ms(void);  /* CLOCK_MONOTONIC 毫秒数 */
 
+/* ===== Stdlib API ===== */
+
+void    l25_sleep_ms(int ms);   /* 毫秒级休眠 */
+void    l25_exit(int code);     /* 进程退出 */
+int     l25_rand(void);         /* 伪随机整数 [0, RAND_MAX] */
+void    l25_srand(int seed);    /* 设置随机种子 */
+
 #ifdef __cplusplus
 }
 #endif

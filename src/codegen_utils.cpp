@@ -1013,6 +1013,30 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_clock_ms",
             llvm::FunctionType::get(floatTy, {}, false));
     }
+
+    // l25_sleep_ms(i32) → void
+    if (!ctx.module.getFunction("l25_sleep_ms")) {
+        ctx.module.getOrInsertFunction("l25_sleep_ms",
+            llvm::FunctionType::get(voidTy, {i32Ty}, false));
+    }
+
+    // l25_exit(i32) → void
+    if (!ctx.module.getFunction("l25_exit")) {
+        ctx.module.getOrInsertFunction("l25_exit",
+            llvm::FunctionType::get(voidTy, {i32Ty}, false));
+    }
+
+    // l25_rand() → i32
+    if (!ctx.module.getFunction("l25_rand")) {
+        ctx.module.getOrInsertFunction("l25_rand",
+            llvm::FunctionType::get(i32Ty, {}, false));
+    }
+
+    // l25_srand(i32) → void
+    if (!ctx.module.getFunction("l25_srand")) {
+        ctx.module.getOrInsertFunction("l25_srand",
+            llvm::FunctionType::get(voidTy, {i32Ty}, false));
+    }
 }
 
 // ===== 根栈 push（通过函数调用，线程安全） =====

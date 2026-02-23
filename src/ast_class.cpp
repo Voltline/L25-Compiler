@@ -222,6 +222,13 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
     llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
     ctx.builder.SetInsertPoint(entry);
 
+    // Early return 支持：设置统一返回块和返回值存储
+    auto* savedReturnBlock = ctx.returnBlock;
+    auto* savedRetAlloca = ctx.retAlloca;
+    ctx.retAlloca = ctx.builder.CreateAlloca(retType, nullptr, "retval");
+    ctx.builder.CreateStore(defaultValueForType(returnType, ctx), ctx.retAlloca);
+    ctx.returnBlock = llvm::BasicBlock::Create(ctx.context, "return");
+
     int idx = 0;
     for (auto& arg : function->args()) {
         if (idx == 0) {
@@ -267,34 +274,51 @@ llvm::Value* MethodDecl::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : defaultValueForType(returnType, ctx);
+    // 处理 opt_return（方法末尾的返回值表达式）
+    if (!ctx.builder.GetInsertBlock()->getTerminator()) {
+        llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : nullptr;
 
-    // 如果返回字符串变量，先将其数据置空以阻止清理释放返回值
-    if (return_value) {
-        if (returnType.kind == SymbolKind::String && returnType.pointerLevel == 0) {
-            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
-                SymbolInfo* sym = bodyScope->lookup(identRet->ident);
-                if (sym && sym->addr) {
-                    llvm::StructType* strTy = getL25StringType(ctx.context);
-                    ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
+        // 如果返回字符串变量，先将其数据置空以阻止清理释放返回值
+        if (return_value && retVal) {
+            if (returnType.kind == SymbolKind::String && returnType.pointerLevel == 0) {
+                if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                    SymbolInfo* sym = bodyScope->lookup(identRet->ident);
+                    if (sym && sym->addr) {
+                        llvm::StructType* strTy = getL25StringType(ctx.context);
+                        ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
+                    }
+                } else if (!isOwnedStringExpr(return_value.get())) {
+                    retVal = emitStringDeepCopy(retVal, ctx);
                 }
-            } else if (!isOwnedStringExpr(return_value.get())) {
-                retVal = emitStringDeepCopy(retVal, ctx);
-            }
-        } else if (returnType.kind == SymbolKind::Class && returnType.pointerLevel > 0) {
-            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
-                SymbolInfo* sym = bodyScope->lookup(identRet->ident);
-                if (sym && sym->addr) {
-                    llvm::Type* ptrTy = retVal->getType();
-                    ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(ptrTy)), sym->addr);
+            } else if (returnType.kind == SymbolKind::Class && returnType.pointerLevel > 0) {
+                if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                    SymbolInfo* sym = bodyScope->lookup(identRet->ident);
+                    if (sym && sym->addr) {
+                        llvm::Type* ptrTy = retVal->getType();
+                        ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(ptrTy)), sym->addr);
+                    }
                 }
             }
+            retVal = castValueToType(retVal, retType, ctx);
+            ctx.builder.CreateStore(retVal, ctx.retAlloca);
         }
+
+        emitScopeCleanup(ctx);
+        ctx.builder.CreateBr(ctx.returnBlock);
+    } else {
+        ctx.popCleanupScope();
     }
 
-    emitScopeCleanup(ctx);
-    retVal = castValueToType(retVal, retType, ctx);
-    ctx.builder.CreateRet(retVal);
+    // 插入统一返回块并生成 ret
+    ctx.returnBlock->insertInto(function);
+    ctx.builder.SetInsertPoint(ctx.returnBlock);
+    llvm::Value* finalRet = ctx.builder.CreateLoad(retType, ctx.retAlloca, "retval.load");
+    ctx.builder.CreateRet(finalRet);
+
+    // 恢复外层上下文
+    ctx.returnBlock = savedReturnBlock;
+    ctx.retAlloca = savedRetAlloca;
+
     return function;
 }
 

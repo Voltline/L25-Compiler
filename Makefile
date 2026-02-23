@@ -136,8 +136,11 @@ l25_channel.o: $(RUNTIME_DIR)/l25_channel.c $(RUNTIME_DIR)/l25_runtime.h
 l25_clock.o: $(RUNTIME_DIR)/l25_clock.c $(RUNTIME_DIR)/l25_runtime.h
 	$(CC) -O2 -c $(RUNTIME_DIR)/l25_clock.c -I$(RUNTIME_DIR) -o l25_clock.o
 
-libl25rt.a: l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o l25_thread.o l25_channel.o l25_clock.o
-	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o l25_thread.o l25_channel.o l25_clock.o
+l25_stdlib.o: $(RUNTIME_DIR)/l25_stdlib.c $(RUNTIME_DIR)/l25_runtime.h
+	$(CC) -O2 -c $(RUNTIME_DIR)/l25_stdlib.c -I$(RUNTIME_DIR) -o l25_stdlib.o
+
+libl25rt.a: l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o l25_thread.o l25_channel.o l25_clock.o l25_stdlib.o
+	ar rcs libl25rt.a l25_vector.o l25_map.o l25_gc.o l25_deque.o l25_queue.o l25_thread.o l25_channel.o l25_clock.o l25_stdlib.o
 
 clean:
 	rm -f *.o parser.tab.cpp parser.tab.hpp lexer.cpp compiler.out *.bc l25cc parser.output libl25rt.a bench_gc

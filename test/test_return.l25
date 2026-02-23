@@ -1,0 +1,51 @@
+program TestReturn {
+    // 测试早期 return：在 if 中提前返回
+    func abs(x: int) -> int {
+        if (x < 0) {
+            return 0 - x;
+        };
+        return x;
+    }
+
+    // 测试多分支全部 return
+    func sign(x: int) -> int {
+        if (x > 0) {
+            return 1;
+        };
+        if (x < 0) {
+            return 0 - 1;
+        };
+        return 0;
+    }
+
+    // 测试无返回值的早期 return
+    func print_positive(x: int) {
+        if (x <= 0) {
+            return;
+        };
+        output(x);
+    }
+
+    // 测试在循环里 return
+    func find_first_gt(threshold: int) -> int {
+        let i = 0;
+        while (i < 100) {
+            if (i > threshold) {
+                return i;
+            };
+            i = i + 1;
+        };
+        return 0 - 1;
+    }
+
+    main {
+        output(abs(5));
+        output(abs(0 - 3));
+        output(sign(42));
+        output(sign(0 - 7));
+        output(sign(0));
+        print_positive(10);
+        print_positive(0 - 5);
+        output(find_first_gt(50));
+    }
+}

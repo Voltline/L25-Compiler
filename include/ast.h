@@ -34,6 +34,7 @@ struct PrintfStmt;
 struct ScanfStmt;
 struct SpawnStmt;
 struct BreakStmt;
+struct ReturnStmt;
 struct ChannelRecvStmt;
 struct ForRangeChannelStmt;
 struct Expr;
@@ -100,6 +101,10 @@ struct CodeGenContext
     // break 目标栈：循环 push 对应的 afterBlock，break 跳转到栈顶
     std::vector<llvm::BasicBlock*> breakTargets;
 
+    // early return 支持：函数级别的返回块和返回值存储
+    llvm::BasicBlock* returnBlock = nullptr;
+    llvm::AllocaInst* retAlloca = nullptr;
+
     // 构造函数简化传参
     CodeGenContext(llvm::LLVMContext& ctx,
                    llvm::Module& mod,
@@ -130,16 +135,29 @@ struct ASTNode
     void reportError(const std::string& msg) const;
 };
 
+// 枚举声明节点
+struct EnumDecl: public ASTNode
+{
+    std::string name;
+    std::vector<std::string> values;
+
+    EnumDecl(const std::string& name, std::vector<std::string> values);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
 // 程序节点
 struct Program: public ASTNode
 {
     std::unique_ptr<IdentExpr> name;
     std::vector<std::unique_ptr<ClassDecl>> classes;
+    std::vector<std::unique_ptr<EnumDecl>> enums;
     std::vector<std::unique_ptr<Func>> functions;
     std::unique_ptr<StmtList> main_body;
 
     Program(std::unique_ptr<IdentExpr> name,
             std::vector<std::unique_ptr<ClassDecl>> classes,
+            std::vector<std::unique_ptr<EnumDecl>> enums,
             std::vector<std::unique_ptr<Func>> functions,
             std::unique_ptr<StmtList> main_body);
 
@@ -424,6 +442,15 @@ struct DeleteStmt: public Stmt
 struct BreakStmt: public Stmt
 {
     BreakStmt() = default;
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// 早期 return 语句: return expr;
+struct ReturnStmt: public Stmt
+{
+    std::unique_ptr<Expr> value; // Nullable (无表达式则返回默认值)
+    explicit ReturnStmt(std::unique_ptr<Expr> value = nullptr);
     void print(int indent = 0) const override;
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };

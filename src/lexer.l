@@ -39,6 +39,7 @@ ident {letter}({letter}|[0-9])*
 "while"     { updateLocationAndColumn(); return WHILE; }
 "for"       { updateLocationAndColumn(); return FOR; }
 "break"     { updateLocationAndColumn(); return BREAK; }
+"enum"      { updateLocationAndColumn(); return ENUM; }
 "input"     { updateLocationAndColumn(); return INPUT; }
 "output"    { updateLocationAndColumn(); return OUTPUT; }
 "return"    { updateLocationAndColumn(); return RETURN; }

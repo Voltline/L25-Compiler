@@ -1328,7 +1328,9 @@ llvm::Value* IdentExpr::codeGen(CodeGenContext& ctx) const
     }
 
     // 如果为变量
-    if (symbol->kind == SymbolKind::Int || symbol->kind == SymbolKind::Float) {
+    if (symbol->isConst) {
+        return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), symbol->constIntValue);
+    } else if (symbol->kind == SymbolKind::Int || symbol->kind == SymbolKind::Float) {
         llvm::Type* valueType = symbol->isFloat ? llvm::Type::getFloatTy(ctx.context) : llvm::Type::getInt32Ty(ctx.context);
         return ctx.builder.CreateLoad(valueType, symbol->addr, ident);
     } else if (symbol->kind == SymbolKind::Pointer) {

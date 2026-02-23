@@ -21,19 +21,42 @@ void ASTNode::reportError(const std::string& msg) const
     reportErrorAt(*this, "代码生成", msg);
 }
 
+// ===== 枚举声明节点 =====
+EnumDecl::EnumDecl(const std::string& name, std::vector<std::string> values)
+    : name(name), values(std::move(values)) {}
+
+void EnumDecl::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "EnumDecl(" << name << ")" << std::endl;
+    for (size_t i = 0; i < values.size(); i++) {
+        std::cout << std::string(indent + 2, ' ') << values[i] << " = " << i << std::endl;
+    }
+}
+
+llvm::Value* EnumDecl::codeGen(CodeGenContext& ctx) const
+{
+    // 枚举值在语义分析阶段已注册为常量，codegen 无需额外操作
+    return nullptr;
+}
+
 // ===== 程序节点 =====
 Program::Program(std::unique_ptr<IdentExpr> name,
                  std::vector<std::unique_ptr<ClassDecl>> classes,
+                 std::vector<std::unique_ptr<EnumDecl>> enums,
                  std::vector<std::unique_ptr<Func>> functions,
                  std::unique_ptr<StmtList> main_body)
     : name(std::move(name))
     , classes(std::move(classes))
+    , enums(std::move(enums))
     , functions(std::move(functions))
     , main_body(std::move(main_body)) {}
 
 void Program::print(int indent) const
 {
     std::cout << std::string(indent, ' ') << "Program(" << *name << ")" << std::endl;
+    for (const auto& e : enums) {
+        e->print(indent + 2);
+    }
     for (const auto& cls : classes) {
         cls->print(indent + 2);
     }

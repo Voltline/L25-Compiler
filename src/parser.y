@@ -63,6 +63,9 @@ extern Program* rootProgram;
     CtorDecl* ctorDecl;
     DtorDecl* dtorDecl;
     ClassMemberAggregate* classMembers;
+    EnumDecl* enumDecl;
+    std::vector<std::unique_ptr<EnumDecl>>* enumList;
+    std::vector<std::string>* enumValues;
     BoolExpr* boolExpr;
     ArgList* argList; // 函数调用与output共用
     FuncCallStmt* funcCallStmt;
@@ -87,6 +90,9 @@ extern Program* rootProgram;
 %type <methodDecl> method_decl
 %type <ctorDecl> ctor_decl
 %type <dtorDecl> dtor_decl
+%type <enumDecl> enum_def
+%type <enumList> enum_def_list opt_enum_def_list
+%type <enumValues> enum_value_list
 %type <paramList> param_list
 %type <argList> arg_list
 %type <inputArgList> input_arg_list
@@ -115,7 +121,6 @@ extern Program* rootProgram;
 %type <expr> assignable
 %type <expr> array_subscript_expr
 %type <arraySubscriptList> array_subscript_list
-%type <expr> opt_return
 
 %type <boolExpr> bool_expr
 
@@ -128,7 +133,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN IN
 %token PRINTF SCANF
@@ -149,21 +154,23 @@ extern Program* rootProgram;
 
 %%
 input:
-    PROGRAM IDENT LBRACE opt_class_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    PROGRAM IDENT LBRACE opt_enum_def_list opt_class_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
-        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($7));
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$5), std::move(*$4), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($8));
         rootProgram = $$;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $4;
+        delete $5;
     }
-    | PROGRAM IDENT LBRACE opt_class_def_list func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    | PROGRAM IDENT LBRACE opt_enum_def_list opt_class_def_list func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
-        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::move(*$5), std::unique_ptr<StmtList>($8));
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$5), std::move(*$4), std::move(*$6), std::unique_ptr<StmtList>($9));
         rootProgram = $$;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $4;
+        delete $5;
     }
     ;
 
@@ -188,6 +195,56 @@ opt_class_def_list
     | class_def_list
     {
         $$ = $1;
+    }
+    ;
+
+opt_enum_def_list
+    :
+    {
+        $$ = new std::vector<std::unique_ptr<EnumDecl>>();
+    }
+    | enum_def_list
+    {
+        $$ = $1;
+    }
+    ;
+
+enum_def_list
+    : enum_def
+    {
+        $$ = new std::vector<std::unique_ptr<EnumDecl>>();
+        $$->push_back(std::unique_ptr<EnumDecl>($1));
+    }
+    | enum_def_list enum_def
+    {
+        $$ = $1;
+        $$->push_back(std::unique_ptr<EnumDecl>($2));
+    }
+    ;
+
+enum_def
+    : ENUM IDENT LBRACE enum_value_list RBRACE
+    {
+        $$ = new EnumDecl(*$2, std::move(*$4));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $2;
+        delete $4;
+    }
+    ;
+
+enum_value_list
+    : IDENT
+    {
+        $$ = new std::vector<std::string>();
+        $$->push_back(*$1);
+        delete $1;
+    }
+    | enum_value_list COMMA IDENT
+    {
+        $$ = $1;
+        $$->push_back(*$3);
+        delete $3;
     }
     ;
 
@@ -278,17 +335,17 @@ field_decl
     ;
 
 method_decl
-    : FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    : FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list RBRACE
     {
-        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), nullptr, *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $2;
         delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list RBRACE
     {
-        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
+        $$ = new MethodDecl(std::make_unique<IdentExpr>(*$2), nullptr, std::unique_ptr<StmtList>($7), nullptr, *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $2;
@@ -324,16 +381,16 @@ dtor_decl
     ;
 
 func:
-    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), nullptr, *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), nullptr, *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $5;
@@ -341,30 +398,19 @@ func:
     ;
 
 nested_func_stmt:
-    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    FUNC IDENT LPAREN param_list RPAREN opt_return_type LBRACE stmt_list RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), std::unique_ptr<Expr>($9), *$6);
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::unique_ptr<ParamList>($4), std::unique_ptr<StmtList>($8), nullptr, *$6);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $6;
     }
-    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list opt_return RBRACE
+    | FUNC IDENT LPAREN RPAREN opt_return_type LBRACE stmt_list RBRACE
     {
-        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), std::unique_ptr<Expr>($8), *$5);
+        $$ = new Func(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), nullptr, std::unique_ptr<StmtList>($7), nullptr, *$5);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $5;
-    }
-    ;
-
-opt_return:
-    RETURN expr SEMICOLON
-    {
-        $$ = $2;
-    }
-    |
-    {
-        $$ = nullptr;
     }
     ;
 
@@ -435,6 +481,18 @@ input_arg_list:
 
 stmt:
     declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | for_range_channel_stmt | channel_recv_stmt | input_stmt | output_stmt | printf_stmt | scanf_stmt
+    | RETURN expr
+    {
+        $$ = new ReturnStmt(std::unique_ptr<Expr>($2));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | RETURN
+    {
+        $$ = new ReturnStmt(nullptr);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     | BREAK
     {
         $$ = new BreakStmt();

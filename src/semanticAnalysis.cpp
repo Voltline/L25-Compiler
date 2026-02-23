@@ -66,6 +66,12 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     TypeInfo floatType(SymbolKind::Float, {});
     registerBuiltin("clock_ms", "l25_clock_ms", {}, floatType);
 
+    // 系统调用函数
+    registerBuiltin("sleep_ms", "l25_sleep_ms", {intType}, voidType);
+    registerBuiltin("exit",     "l25_exit",     {intType}, voidType);
+    registerBuiltin("rand",     "l25_rand",     {},        intType);
+    registerBuiltin("srand",    "l25_srand",    {intType}, voidType);
+
     // GC 监测函数
     registerBuiltin("gc_stats",     "l25_gc_stats",     {}, voidType);
     registerBuiltin("gc_count",     "l25_gc_count",     {}, intType);
@@ -78,6 +84,22 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     registerBuiltin("gc_collect",   "l25_gc_collect",   {}, voidType);
     registerBuiltin("gc_pause",     "l25_gc_pause",     {}, voidType);
     registerBuiltin("gc_resume",    "l25_gc_resume",    {}, voidType);
+
+    // ===== 注册枚举定义 =====
+    for (auto& enumDecl : program.enums) {
+        enumDecl->scope = currentScope;
+        for (size_t i = 0; i < enumDecl->values.size(); i++) {
+            const std::string& valName = enumDecl->values[i];
+            if (checkSameScopeSymbolExists(valName)) {
+                reportError(*enumDecl, "枚举值重定义：" + valName);
+                continue;
+            }
+            SymbolInfo info(SymbolKind::Int, valName);
+            info.isConst = true;
+            info.constIntValue = static_cast<int>(i);
+            declareSymbol(valName, info);
+        }
+    }
 
     // 先注册类符号
     for (auto& cls : program.classes) {
@@ -146,6 +168,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
     enterScope();
     func.body_scope = currentScope;
     funcStack.push_back(&func);
+    funcDepth++;
     if (func.params) {
         for (const auto& param: func.params->params) {
             // TODO: 这里可能有求值存入value的需求
@@ -161,6 +184,7 @@ void SemanticAnalyzer::analyzeFunc(Func& func)
         warnZeroAsNil(func, func.returnType, func.return_value.get());
     }
     funcStack.pop_back();
+    funcDepth--;
     exitScope();
 }
 
@@ -247,6 +271,7 @@ void SemanticAnalyzer::analyzeMethod(MethodDecl& method)
     method.scope = currentScope;
     enterScope();
     method.bodyScope = currentScope;
+    funcDepth++;
     if (currentClass) {
         TypeInfo thisType{ SymbolKind::Class, {}, 1, false, currentClass->name->ident };
         SymbolInfo thisInfo{ "this", thisType };
@@ -267,6 +292,7 @@ void SemanticAnalyzer::analyzeMethod(MethodDecl& method)
         analyzeExpr(*method.return_value);
         warnZeroAsNil(method, method.returnType, method.return_value.get());
     }
+    funcDepth--;
     exitScope();
 }
 
@@ -458,6 +484,13 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         if (loopDepth <= 0) {
             reportError(stmt, "break 语句只能在循环内使用");
         }
+    } else if (auto retStmt = dynamic_cast<ReturnStmt*>(&stmt)) {
+        if (funcDepth <= 0) {
+            reportError(stmt, "return 语句只能在函数内使用");
+        }
+        if (retStmt->value) {
+            analyzeExpr(*retStmt->value);
+        }
     } else if (auto chanRecv = dynamic_cast<ChannelRecvStmt*>(&stmt)) {
         // let val, ok = ch.recv();
         // 检查 channel 表达式
@@ -543,7 +576,8 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
 
                 if (!insideCurrentFunc) {
                     SymbolInfo* capturedSymbol = currentScope->lookup(ident->ident);
-                    if (capturedSymbol && capturedSymbol->kind != SymbolKind::Function && capturedSymbol->kind != SymbolKind::Program) {
+                    if (capturedSymbol && capturedSymbol->kind != SymbolKind::Function && capturedSymbol->kind != SymbolKind::Program
+                        && !capturedSymbol->isConst) {
                         auto& captureList = funcStack.back()->captures;
                         if (std::find(captureList.begin(), captureList.end(), capturedSymbol) == captureList.end()) {
                             captureList.push_back(capturedSymbol);

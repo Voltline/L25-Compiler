@@ -85,6 +85,13 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
     llvm::BasicBlock* entry = llvm::BasicBlock::Create(ctx.context, "entry", function);
     ctx.builder.SetInsertPoint(entry);
 
+    // Early return 支持：设置统一返回块和返回值存储
+    auto* savedReturnBlock = ctx.returnBlock;
+    auto* savedRetAlloca = ctx.retAlloca;
+    ctx.retAlloca = ctx.builder.CreateAlloca(retLLVMType, nullptr, "retval");
+    ctx.builder.CreateStore(defaultValueForType(retTypeInfo, ctx), ctx.retAlloca);
+    ctx.returnBlock = llvm::BasicBlock::Create(ctx.context, "return");
+
     std::vector<std::pair<SymbolInfo*, llvm::Value*>> capturedOriginalAddrs;
 
     int idx = 0;
@@ -137,35 +144,51 @@ llvm::Value* Func::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : defaultValueForType(retTypeInfo, ctx);
+    // 处理 opt_return（函数末尾的返回值表达式）
+    if (!ctx.builder.GetInsertBlock()->getTerminator()) {
+        llvm::Value* retVal = return_value ? return_value->codeGen(ctx) : nullptr;
 
-    // 如果返回字符串变量，先将其数据置空以阻止清理释放返回值
-    if (return_value) {
-        if (retTypeInfo.kind == SymbolKind::String && retTypeInfo.pointerLevel == 0) {
-            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
-                SymbolInfo* sym = body_scope->lookup(identRet->ident);
-                if (sym && sym->addr) {
-                    llvm::StructType* strTy = getL25StringType(ctx.context);
-                    ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
+        // 如果返回字符串变量，先将其数据置空以阻止清理释放返回值
+        if (return_value && retVal) {
+            if (retTypeInfo.kind == SymbolKind::String && retTypeInfo.pointerLevel == 0) {
+                if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                    SymbolInfo* sym = body_scope->lookup(identRet->ident);
+                    if (sym && sym->addr) {
+                        llvm::StructType* strTy = getL25StringType(ctx.context);
+                        ctx.builder.CreateStore(llvm::ConstantAggregateZero::get(strTy), sym->addr);
+                    }
+                } else if (!isOwnedStringExpr(return_value.get())) {
+                    retVal = emitStringDeepCopy(retVal, ctx);
                 }
-            } else if (!isOwnedStringExpr(return_value.get())) {
-                // 非变量且非拥有型表达式（如字符串字面量），深拷贝保证返回拥有权缓冲区
-                retVal = emitStringDeepCopy(retVal, ctx);
-            }
-        } else if (retTypeInfo.kind == SymbolKind::Class && retTypeInfo.pointerLevel > 0) {
-            if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
-                SymbolInfo* sym = body_scope->lookup(identRet->ident);
-                if (sym && sym->addr) {
-                    llvm::Type* ptrTy = retVal->getType();
-                    ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(ptrTy)), sym->addr);
+            } else if (retTypeInfo.kind == SymbolKind::Class && retTypeInfo.pointerLevel > 0) {
+                if (auto* identRet = dynamic_cast<IdentExpr*>(return_value.get())) {
+                    SymbolInfo* sym = body_scope->lookup(identRet->ident);
+                    if (sym && sym->addr) {
+                        llvm::Type* ptrTy = retVal->getType();
+                        ctx.builder.CreateStore(llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(ptrTy)), sym->addr);
+                    }
                 }
             }
+            retVal = castValueToType(retVal, retLLVMType, ctx);
+            ctx.builder.CreateStore(retVal, ctx.retAlloca);
         }
+
+        emitScopeCleanup(ctx);
+        ctx.builder.CreateBr(ctx.returnBlock);
+    } else {
+        // 当前块已被终结（如所有路径均已 return），仅弹出清理作用域保持平衡
+        ctx.popCleanupScope();
     }
 
-    emitScopeCleanup(ctx);
-    retVal = castValueToType(retVal, retLLVMType, ctx);
-    ctx.builder.CreateRet(retVal);
+    // 插入统一返回块并生成 ret
+    ctx.returnBlock->insertInto(function);
+    ctx.builder.SetInsertPoint(ctx.returnBlock);
+    llvm::Value* finalRet = ctx.builder.CreateLoad(retLLVMType, ctx.retAlloca, "retval.load");
+    ctx.builder.CreateRet(finalRet);
+
+    // 恢复外层上下文
+    ctx.returnBlock = savedReturnBlock;
+    ctx.retAlloca = savedRetAlloca;
 
     // 生成完毕后恢复捕获符号的原始地址
     for (auto& [symbol, originalAddr] : capturedOriginalAddrs) {

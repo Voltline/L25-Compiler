@@ -69,6 +69,8 @@ struct SymbolInfo
     std::unordered_map<std::string, std::vector<TypeInfo>> methodParamTypes; // 方法参数类型
     std::unordered_map<std::string, TypeInfo> methodReturnTypes; // 方法返回类型
     bool isBuiltin = false;              // 是否为内置函数（skip arg count check for variadic builtins）
+    bool isConst = false;                 // 是否为编译期常量（enum 值）
+    int constIntValue = 0;               // 编译期常量值
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

@@ -1,0 +1,45 @@
+program TestEnum {
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    enum Direction {
+        Up,
+        Down,
+        Left,
+        Right
+    }
+
+    func color_name(c: int) -> int {
+        if (c == Red) {
+            return 0;
+        };
+        if (c == Green) {
+            return 1;
+        };
+        if (c == Blue) {
+            return 2;
+        };
+        return 0 - 1;
+    }
+
+    main {
+        // 测试枚举值
+        output(Red);
+        output(Green);
+        output(Blue);
+        output(Up);
+        output(Down);
+        output(Left);
+        output(Right);
+
+        // 测试在表达式中使用枚举
+        let x = Blue + 10;
+        output(x);
+
+        // 测试在函数参数中使用
+        output(color_name(Green));
+    }
+}

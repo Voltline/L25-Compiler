@@ -1,0 +1,35 @@
+program TestStdlib {
+    main {
+        // 测试 srand 和 rand
+        srand(42);
+        let r1 = rand();
+        let r2 = rand();
+        output(r1);
+        output(r2);
+
+        // 测试 sleep_ms（短暂休眠）
+        let t1 = clock_ms();
+        sleep_ms(50);
+        let t2 = clock_ms();
+        // t2 - t1 应该 >= 50ms
+        let elapsed: float = t2 - t1;
+        // 输出是否至少休眠了 40ms（给一些容差）
+        if (elapsed > 40.0) {
+            output(1);
+        } else {
+            output(0);
+        };
+
+        // 测试 rand 返回非负数
+        srand(123);
+        let ok = 1;
+        let i = 0;
+        while (i < 100) {
+            if (rand() < 0) {
+                ok = 0;
+            };
+            i = i + 1;
+        };
+        output(ok);
+    }
+}
