@@ -5,6 +5,7 @@
  * 主线程在程序退出前等待所有未完成的任务。
  */
 #include "l25_runtime.h"
+#include "l25_gc.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -35,6 +36,8 @@ static ThreadPool* pool = NULL;
 /* ===== 工作线程主循环 ===== */
 static void* worker_main(void* arg) {
     (void)arg;
+    /* 注册当前工作线程到 GC（根栈生命周期 = 线程生命周期） */
+    l25_gc_thread_init();
     for (;;) {
         pthread_mutex_lock(&pool->mutex);
 
@@ -67,6 +70,8 @@ static void* worker_main(void* arg) {
         }
         pthread_mutex_unlock(&pool->mutex);
     }
+    /* 注销当前工作线程的 GC 根栈 */
+    l25_gc_thread_fini();
     return NULL;
 }
 

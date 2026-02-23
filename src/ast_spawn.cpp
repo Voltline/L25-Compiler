@@ -263,10 +263,7 @@ llvm::Value* SpawnStmt::codeGen(CodeGenContext& ctx) const {
     ctx.builder.SetInsertPoint(wrapperEntry);
     ctx.currentFunction = wrapperFn;
 
-    // 注册当前 spawn 线程到 GC
-    ensureGCRuntimeDeclared(ctx);
-    auto* threadInitFn = ctx.module.getFunction("l25_gc_thread_init");
-    ctx.builder.CreateCall(threadInitFn, {});
+    // Worker 线程已在 worker_main 入口注册 GC 根栈，无需重复注册
 
     // 解包 capture struct
     llvm::Value* rawArg = wrapperFn->getArg(0);
@@ -312,10 +309,6 @@ llvm::Value* SpawnStmt::codeGen(CodeGenContext& ctx) const {
 
     // ------ 5. RAII 清理 + return void ------
     emitScopeCleanup(ctx);
-
-    // 注销当前 spawn 线程的 GC 根栈
-    auto* threadFiniFn = ctx.module.getFunction("l25_gc_thread_fini");
-    ctx.builder.CreateCall(threadFiniFn, {});
 
     ctx.builder.CreateRetVoid();
 

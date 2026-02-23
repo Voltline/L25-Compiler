@@ -24,8 +24,9 @@ typedef struct GCObject {
 
 // ===== 每线程根栈 =====
 typedef struct {
-    void*   stack[L25_ROOT_STACK_MAX];
-    int32_t sp;
+    void*           stack[L25_ROOT_STACK_MAX];
+    int32_t         sp;
+    pthread_mutex_t lock;   // 保护 stack/sp 的一致性（GC 扫描 vs 线程 push/pop）
 } ThreadRootStack;
 
 // TLS：当前线程的根栈指针
@@ -123,6 +124,7 @@ void l25_gc_thread_init(void) {
     if (tls_roots) return; // 已注册
     ThreadRootStack* rs = (ThreadRootStack*)calloc(1, sizeof(ThreadRootStack));
     rs->sp = 0;
+    pthread_mutex_init(&rs->lock, NULL);
     tls_roots = rs;
 
     pthread_mutex_lock(&gc_lock);
@@ -145,22 +147,27 @@ void l25_gc_thread_fini(void) {
         }
     }
     pthread_mutex_unlock(&gc_lock);
+    pthread_mutex_destroy(&rs->lock);
     free(rs);
 }
 
-// ===== 根栈操作（操作当前线程的根栈，无需 GC 锁） =====
+// ===== 根栈操作（线程安全：per-thread mutex 保护 sp/stack 一致性） =====
 void l25_gc_root_push(void** slot) {
     if (!tls_roots) return;
+    pthread_mutex_lock(&tls_roots->lock);
     if (tls_roots->sp < L25_ROOT_STACK_MAX) {
         tls_roots->stack[tls_roots->sp++] = (void*)slot;
     }
+    pthread_mutex_unlock(&tls_roots->lock);
 }
 
 void l25_gc_root_pop(void) {
     if (!tls_roots) return;
+    pthread_mutex_lock(&tls_roots->lock);
     if (tls_roots->sp > 0) {
         tls_roots->sp--;
     }
+    pthread_mutex_unlock(&tls_roots->lock);
 }
 
 // ===== 增量标记：处理 N 个灰色对象 =====
@@ -189,9 +196,11 @@ static void gc_start_cycle(void) {
     gc.gray_list = NULL;
 
     // 2. 从所有线程的根栈出发将直接可达对象标灰
+    //    锁定每个线程的根栈 mutex，防止 push/pop 与扫描并发
     for (int t = 0; t < all_roots_count; t++) {
         ThreadRootStack* rs = all_roots[t];
         if (!rs) continue;
+        pthread_mutex_lock(&rs->lock);
         for (int32_t i = 0; i < rs->sp; i++) {
             void** slot = (void**)rs->stack[i];
             void* ptr = *slot;
@@ -199,6 +208,7 @@ static void gc_start_cycle(void) {
                 shade_gray(get_header(ptr));
             }
         }
+        pthread_mutex_unlock(&rs->lock);
     }
 
     gc.phase = GC_PHASE_MARKING;
