@@ -2,16 +2,16 @@
 // bench_parallel.l25  –  并行 vs 串行质数计算压测
 //
 // 任务: 统计 [2, N] 中质数个数
-// 方法: 逐个试除法 (故意用较慢的算法以增加负载)
+// 方法: 逐个试除法
 //
 // 串行: 单线程算完整区间
-// 并行: 将区间分成 NWORKERS 段, 每段 spawn 一个 goroutine
-//        结果通过 channel 汇总
+// 并行: 将区间分成 NCHUNKS 段 (细粒度), spawn NCHUNKS 个任务
+//        线程池自动调度, 结果通过 channel 汇总
 // ==============================================
 
 program BenchParallel {
 
-    // ---- 朴素质数判断 ----
+    // ---- 朴素质数判断 (含 break 优化) ----
     func is_prime(n: int) -> int {
         let result: int = 1;
         if (n < 2) {
@@ -24,9 +24,11 @@ program BenchParallel {
                     result = 0;
                 } else {
                     let d: int = 3;
-                    while (d * d <= n) {
+                    let found: int = 0;
+                    while (d * d <= n && found == 0) {
                         if (n % d == 0) {
                             result = 0;
+                            found = 1;
                         };
                         d = d + 2;
                     };
@@ -49,11 +51,11 @@ program BenchParallel {
 
     main {
         let N: int = 2000000;
-        let NWORKERS: int = 8;
+        let NCHUNKS: int = 64;
 
         output("========================================");
         printf("  Benchmark: prime count in [2, %d]\n", N);
-        printf("  Workers:   %d\n", NWORKERS);
+        printf("  Chunks:    %d\n", NCHUNKS);
         output("========================================");
 
         // --- 串行 ---
@@ -64,72 +66,225 @@ program BenchParallel {
         printf("  Serial   result = %d\n", serial_result);
         printf("  Serial   time   = %.1f ms\n", serial_ms);
 
-        // --- 并行 ---
-        let ch: channel<int, 8>;
-        let range_size: int = (N - 1) / NWORKERS;
+        // --- 并行: 64 个细粒度任务块 ---
+        let ch: channel<int, 64>;
+        let total_range: int = N - 1;
+        let chunk_size: int = total_range / NCHUNKS;
 
         let t2: float = clock_ms();
 
-        let lo0: int = 2 + 0 * range_size;
-        let hi0: int = lo0 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo0, hi0);
-            ch.send(cnt);
-        };
+        // chunk 0..7
+        let c0lo: int = 2 + 0 * chunk_size;
+        let c0hi: int = c0lo + chunk_size;
+        spawn { ch.send(count_primes_range(c0lo, c0hi)); };
+        let c1lo: int = 2 + 1 * chunk_size;
+        let c1hi: int = c1lo + chunk_size;
+        spawn { ch.send(count_primes_range(c1lo, c1hi)); };
+        let c2lo: int = 2 + 2 * chunk_size;
+        let c2hi: int = c2lo + chunk_size;
+        spawn { ch.send(count_primes_range(c2lo, c2hi)); };
+        let c3lo: int = 2 + 3 * chunk_size;
+        let c3hi: int = c3lo + chunk_size;
+        spawn { ch.send(count_primes_range(c3lo, c3hi)); };
+        let c4lo: int = 2 + 4 * chunk_size;
+        let c4hi: int = c4lo + chunk_size;
+        spawn { ch.send(count_primes_range(c4lo, c4hi)); };
+        let c5lo: int = 2 + 5 * chunk_size;
+        let c5hi: int = c5lo + chunk_size;
+        spawn { ch.send(count_primes_range(c5lo, c5hi)); };
+        let c6lo: int = 2 + 6 * chunk_size;
+        let c6hi: int = c6lo + chunk_size;
+        spawn { ch.send(count_primes_range(c6lo, c6hi)); };
+        let c7lo: int = 2 + 7 * chunk_size;
+        let c7hi: int = c7lo + chunk_size;
+        spawn { ch.send(count_primes_range(c7lo, c7hi)); };
 
-        let lo1: int = 2 + 1 * range_size;
-        let hi1: int = lo1 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo1, hi1);
-            ch.send(cnt);
-        };
+        // chunk 8..15
+        let c8lo: int = 2 + 8 * chunk_size;
+        let c8hi: int = c8lo + chunk_size;
+        spawn { ch.send(count_primes_range(c8lo, c8hi)); };
+        let c9lo: int = 2 + 9 * chunk_size;
+        let c9hi: int = c9lo + chunk_size;
+        spawn { ch.send(count_primes_range(c9lo, c9hi)); };
+        let c10lo: int = 2 + 10 * chunk_size;
+        let c10hi: int = c10lo + chunk_size;
+        spawn { ch.send(count_primes_range(c10lo, c10hi)); };
+        let c11lo: int = 2 + 11 * chunk_size;
+        let c11hi: int = c11lo + chunk_size;
+        spawn { ch.send(count_primes_range(c11lo, c11hi)); };
+        let c12lo: int = 2 + 12 * chunk_size;
+        let c12hi: int = c12lo + chunk_size;
+        spawn { ch.send(count_primes_range(c12lo, c12hi)); };
+        let c13lo: int = 2 + 13 * chunk_size;
+        let c13hi: int = c13lo + chunk_size;
+        spawn { ch.send(count_primes_range(c13lo, c13hi)); };
+        let c14lo: int = 2 + 14 * chunk_size;
+        let c14hi: int = c14lo + chunk_size;
+        spawn { ch.send(count_primes_range(c14lo, c14hi)); };
+        let c15lo: int = 2 + 15 * chunk_size;
+        let c15hi: int = c15lo + chunk_size;
+        spawn { ch.send(count_primes_range(c15lo, c15hi)); };
 
-        let lo2: int = 2 + 2 * range_size;
-        let hi2: int = lo2 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo2, hi2);
-            ch.send(cnt);
-        };
+        // chunk 16..23
+        let c16lo: int = 2 + 16 * chunk_size;
+        let c16hi: int = c16lo + chunk_size;
+        spawn { ch.send(count_primes_range(c16lo, c16hi)); };
+        let c17lo: int = 2 + 17 * chunk_size;
+        let c17hi: int = c17lo + chunk_size;
+        spawn { ch.send(count_primes_range(c17lo, c17hi)); };
+        let c18lo: int = 2 + 18 * chunk_size;
+        let c18hi: int = c18lo + chunk_size;
+        spawn { ch.send(count_primes_range(c18lo, c18hi)); };
+        let c19lo: int = 2 + 19 * chunk_size;
+        let c19hi: int = c19lo + chunk_size;
+        spawn { ch.send(count_primes_range(c19lo, c19hi)); };
+        let c20lo: int = 2 + 20 * chunk_size;
+        let c20hi: int = c20lo + chunk_size;
+        spawn { ch.send(count_primes_range(c20lo, c20hi)); };
+        let c21lo: int = 2 + 21 * chunk_size;
+        let c21hi: int = c21lo + chunk_size;
+        spawn { ch.send(count_primes_range(c21lo, c21hi)); };
+        let c22lo: int = 2 + 22 * chunk_size;
+        let c22hi: int = c22lo + chunk_size;
+        spawn { ch.send(count_primes_range(c22lo, c22hi)); };
+        let c23lo: int = 2 + 23 * chunk_size;
+        let c23hi: int = c23lo + chunk_size;
+        spawn { ch.send(count_primes_range(c23lo, c23hi)); };
 
-        let lo3: int = 2 + 3 * range_size;
-        let hi3: int = lo3 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo3, hi3);
-            ch.send(cnt);
-        };
+        // chunk 24..31
+        let c24lo: int = 2 + 24 * chunk_size;
+        let c24hi: int = c24lo + chunk_size;
+        spawn { ch.send(count_primes_range(c24lo, c24hi)); };
+        let c25lo: int = 2 + 25 * chunk_size;
+        let c25hi: int = c25lo + chunk_size;
+        spawn { ch.send(count_primes_range(c25lo, c25hi)); };
+        let c26lo: int = 2 + 26 * chunk_size;
+        let c26hi: int = c26lo + chunk_size;
+        spawn { ch.send(count_primes_range(c26lo, c26hi)); };
+        let c27lo: int = 2 + 27 * chunk_size;
+        let c27hi: int = c27lo + chunk_size;
+        spawn { ch.send(count_primes_range(c27lo, c27hi)); };
+        let c28lo: int = 2 + 28 * chunk_size;
+        let c28hi: int = c28lo + chunk_size;
+        spawn { ch.send(count_primes_range(c28lo, c28hi)); };
+        let c29lo: int = 2 + 29 * chunk_size;
+        let c29hi: int = c29lo + chunk_size;
+        spawn { ch.send(count_primes_range(c29lo, c29hi)); };
+        let c30lo: int = 2 + 30 * chunk_size;
+        let c30hi: int = c30lo + chunk_size;
+        spawn { ch.send(count_primes_range(c30lo, c30hi)); };
+        let c31lo: int = 2 + 31 * chunk_size;
+        let c31hi: int = c31lo + chunk_size;
+        spawn { ch.send(count_primes_range(c31lo, c31hi)); };
 
-        let lo4: int = 2 + 4 * range_size;
-        let hi4: int = lo4 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo4, hi4);
-            ch.send(cnt);
-        };
+        // chunk 32..39
+        let c32lo: int = 2 + 32 * chunk_size;
+        let c32hi: int = c32lo + chunk_size;
+        spawn { ch.send(count_primes_range(c32lo, c32hi)); };
+        let c33lo: int = 2 + 33 * chunk_size;
+        let c33hi: int = c33lo + chunk_size;
+        spawn { ch.send(count_primes_range(c33lo, c33hi)); };
+        let c34lo: int = 2 + 34 * chunk_size;
+        let c34hi: int = c34lo + chunk_size;
+        spawn { ch.send(count_primes_range(c34lo, c34hi)); };
+        let c35lo: int = 2 + 35 * chunk_size;
+        let c35hi: int = c35lo + chunk_size;
+        spawn { ch.send(count_primes_range(c35lo, c35hi)); };
+        let c36lo: int = 2 + 36 * chunk_size;
+        let c36hi: int = c36lo + chunk_size;
+        spawn { ch.send(count_primes_range(c36lo, c36hi)); };
+        let c37lo: int = 2 + 37 * chunk_size;
+        let c37hi: int = c37lo + chunk_size;
+        spawn { ch.send(count_primes_range(c37lo, c37hi)); };
+        let c38lo: int = 2 + 38 * chunk_size;
+        let c38hi: int = c38lo + chunk_size;
+        spawn { ch.send(count_primes_range(c38lo, c38hi)); };
+        let c39lo: int = 2 + 39 * chunk_size;
+        let c39hi: int = c39lo + chunk_size;
+        spawn { ch.send(count_primes_range(c39lo, c39hi)); };
 
-        let lo5: int = 2 + 5 * range_size;
-        let hi5: int = lo5 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo5, hi5);
-            ch.send(cnt);
-        };
+        // chunk 40..47
+        let c40lo: int = 2 + 40 * chunk_size;
+        let c40hi: int = c40lo + chunk_size;
+        spawn { ch.send(count_primes_range(c40lo, c40hi)); };
+        let c41lo: int = 2 + 41 * chunk_size;
+        let c41hi: int = c41lo + chunk_size;
+        spawn { ch.send(count_primes_range(c41lo, c41hi)); };
+        let c42lo: int = 2 + 42 * chunk_size;
+        let c42hi: int = c42lo + chunk_size;
+        spawn { ch.send(count_primes_range(c42lo, c42hi)); };
+        let c43lo: int = 2 + 43 * chunk_size;
+        let c43hi: int = c43lo + chunk_size;
+        spawn { ch.send(count_primes_range(c43lo, c43hi)); };
+        let c44lo: int = 2 + 44 * chunk_size;
+        let c44hi: int = c44lo + chunk_size;
+        spawn { ch.send(count_primes_range(c44lo, c44hi)); };
+        let c45lo: int = 2 + 45 * chunk_size;
+        let c45hi: int = c45lo + chunk_size;
+        spawn { ch.send(count_primes_range(c45lo, c45hi)); };
+        let c46lo: int = 2 + 46 * chunk_size;
+        let c46hi: int = c46lo + chunk_size;
+        spawn { ch.send(count_primes_range(c46lo, c46hi)); };
+        let c47lo: int = 2 + 47 * chunk_size;
+        let c47hi: int = c47lo + chunk_size;
+        spawn { ch.send(count_primes_range(c47lo, c47hi)); };
 
-        let lo6: int = 2 + 6 * range_size;
-        let hi6: int = lo6 + range_size;
-        spawn {
-            let cnt: int = count_primes_range(lo6, hi6);
-            ch.send(cnt);
-        };
+        // chunk 48..55
+        let c48lo: int = 2 + 48 * chunk_size;
+        let c48hi: int = c48lo + chunk_size;
+        spawn { ch.send(count_primes_range(c48lo, c48hi)); };
+        let c49lo: int = 2 + 49 * chunk_size;
+        let c49hi: int = c49lo + chunk_size;
+        spawn { ch.send(count_primes_range(c49lo, c49hi)); };
+        let c50lo: int = 2 + 50 * chunk_size;
+        let c50hi: int = c50lo + chunk_size;
+        spawn { ch.send(count_primes_range(c50lo, c50hi)); };
+        let c51lo: int = 2 + 51 * chunk_size;
+        let c51hi: int = c51lo + chunk_size;
+        spawn { ch.send(count_primes_range(c51lo, c51hi)); };
+        let c52lo: int = 2 + 52 * chunk_size;
+        let c52hi: int = c52lo + chunk_size;
+        spawn { ch.send(count_primes_range(c52lo, c52hi)); };
+        let c53lo: int = 2 + 53 * chunk_size;
+        let c53hi: int = c53lo + chunk_size;
+        spawn { ch.send(count_primes_range(c53lo, c53hi)); };
+        let c54lo: int = 2 + 54 * chunk_size;
+        let c54hi: int = c54lo + chunk_size;
+        spawn { ch.send(count_primes_range(c54lo, c54hi)); };
+        let c55lo: int = 2 + 55 * chunk_size;
+        let c55hi: int = c55lo + chunk_size;
+        spawn { ch.send(count_primes_range(c55lo, c55hi)); };
 
-        let lo7: int = 2 + 7 * range_size;
-        let hi7: int = N + 1;
-        spawn {
-            let cnt: int = count_primes_range(lo7, hi7);
-            ch.send(cnt);
-        };
+        // chunk 56..63 (最后一块覆盖到 N+1)
+        let c56lo: int = 2 + 56 * chunk_size;
+        let c56hi: int = c56lo + chunk_size;
+        spawn { ch.send(count_primes_range(c56lo, c56hi)); };
+        let c57lo: int = 2 + 57 * chunk_size;
+        let c57hi: int = c57lo + chunk_size;
+        spawn { ch.send(count_primes_range(c57lo, c57hi)); };
+        let c58lo: int = 2 + 58 * chunk_size;
+        let c58hi: int = c58lo + chunk_size;
+        spawn { ch.send(count_primes_range(c58lo, c58hi)); };
+        let c59lo: int = 2 + 59 * chunk_size;
+        let c59hi: int = c59lo + chunk_size;
+        spawn { ch.send(count_primes_range(c59lo, c59hi)); };
+        let c60lo: int = 2 + 60 * chunk_size;
+        let c60hi: int = c60lo + chunk_size;
+        spawn { ch.send(count_primes_range(c60lo, c60hi)); };
+        let c61lo: int = 2 + 61 * chunk_size;
+        let c61hi: int = c61lo + chunk_size;
+        spawn { ch.send(count_primes_range(c61lo, c61hi)); };
+        let c62lo: int = 2 + 62 * chunk_size;
+        let c62hi: int = c62lo + chunk_size;
+        spawn { ch.send(count_primes_range(c62lo, c62hi)); };
+        let c63lo: int = 2 + 63 * chunk_size;
+        let c63hi: int = N + 1;
+        spawn { ch.send(count_primes_range(c63lo, c63hi)); };
 
         // 汇总
         let parallel_result: int = 0;
         let received: int = 0;
-        while (received < NWORKERS) {
+        while (received < NCHUNKS) {
             let partial: int = ch.recv();
             parallel_result = parallel_result + partial;
             received = received + 1;
@@ -152,5 +307,3 @@ program BenchParallel {
         output("========================================");
     }
 }
-
-
