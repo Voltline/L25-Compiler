@@ -68,6 +68,8 @@ int32_t l25_channel_recv_ok(void* ch, void* out_elem); /* 返回 ok: 1=成功, 0
 int64_t l25_channel_len(void* ch);
 void    l25_channel_close(void* ch);
 int32_t l25_channel_closed(void* ch); /* 返回 1=已关闭, 0=未关闭 */
+int32_t l25_channel_try_send(void* ch, const void* elem); /* 非阻塞, 1=成功 */
+int32_t l25_channel_try_recv(void* ch, void* out_elem);   /* 非阻塞, 1=成功 */
 
 /* ===== Thread Pool API ===== */
 

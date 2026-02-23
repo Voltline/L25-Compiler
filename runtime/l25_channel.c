@@ -215,3 +215,85 @@ int32_t l25_channel_closed(void* ptr) {
     pthread_mutex_unlock(&ch->mutex);
     return c;
 }
+
+/* ===== 非阻塞尝试发送（用于 select） =====
+ * 返回: 1 = 发送成功, 0 = 无法立即完成 / 已关闭
+ */
+int32_t l25_channel_try_send(void* ptr, const void* elem) {
+    Channel* ch = (Channel*)ptr;
+    pthread_mutex_lock(&ch->mutex);
+
+    if (ch->closed) {
+        pthread_mutex_unlock(&ch->mutex);
+        return 0;
+    }
+
+    if (ch->capacity == 0) {
+        /* 无缓冲模式：需要接收者已在等待（即没有其他发送者 ready） */
+        /* 非阻塞无法实现 rendezvous，只在没有 pending sender 时尝试 */
+        if (ch->rendezvous_ready) {
+            pthread_mutex_unlock(&ch->mutex);
+            return 0; /* 另一个发送者正在等待 */
+        }
+        /* 即使没有 pending sender，我们也无法保证接收者在等，
+         * 所以无缓冲 channel 的非阻塞发送总是失败 */
+        pthread_mutex_unlock(&ch->mutex);
+        return 0;
+    } else {
+        /* 有缓冲模式：缓冲区有空间则发送 */
+        if (ch->count >= ch->capacity) {
+            pthread_mutex_unlock(&ch->mutex);
+            return 0;
+        }
+        int64_t tail = (ch->head + ch->count) % ch->capacity;
+        memcpy((char*)ch->buffer + tail * ch->elem_size, elem, ch->elem_size);
+        ch->count++;
+        pthread_cond_signal(&ch->not_empty);
+        pthread_mutex_unlock(&ch->mutex);
+        return 1;
+    }
+}
+
+/* ===== 非阻塞尝试接收（用于 select） =====
+ * 返回: 1 = 接收成功, 0 = 无数据可用
+ * 注意: 即使返回 0，如果 channel 已关闭，ok 状态需由调用者通过 closed() 判断
+ */
+int32_t l25_channel_try_recv(void* ptr, void* out) {
+    Channel* ch = (Channel*)ptr;
+    pthread_mutex_lock(&ch->mutex);
+
+    if (ch->capacity == 0) {
+        /* 无缓冲模式：只有发送者在等待时才能接收 */
+        if (!ch->rendezvous_ready) {
+            /* 如果已关闭且没有数据，返回零值 */
+            if (ch->closed) {
+                memset(out, 0, ch->elem_size);
+            }
+            pthread_mutex_unlock(&ch->mutex);
+            return 0;
+        }
+        /* 有数据就绪 */
+        memcpy(out, ch->rendezvous_data, ch->elem_size);
+        ch->rendezvous_ready = 0;
+        ch->rendezvous_data  = NULL;
+        ch->rendezvous_taken = 1;
+        pthread_cond_signal(&ch->rendezvous_done);
+        pthread_mutex_unlock(&ch->mutex);
+        return 1;
+    } else {
+        /* 有缓冲模式：缓冲区有数据则接收 */
+        if (ch->count == 0) {
+            if (ch->closed) {
+                memset(out, 0, ch->elem_size);
+            }
+            pthread_mutex_unlock(&ch->mutex);
+            return 0;
+        }
+        memcpy(out, (char*)ch->buffer + ch->head * ch->elem_size, ch->elem_size);
+        ch->head = (ch->head + 1) % ch->capacity;
+        ch->count--;
+        pthread_cond_signal(&ch->not_full);
+        pthread_mutex_unlock(&ch->mutex);
+        return 1;
+    }
+}

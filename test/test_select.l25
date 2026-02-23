@@ -1,0 +1,75 @@
+program test_select {
+    main {
+        // 测试 1: select with buffered channel recv + default
+        let ch1: channel<int, 4>;
+        ch1.send(42);
+
+        select {
+            case v = ch1.recv(): {
+                output(v);
+            }
+            default: {
+                output(0);
+            }
+        };
+
+        // 测试 2: select recv on empty channel hits default
+        let ch2: channel<int, 4>;
+
+        select {
+            case v = ch2.recv(): {
+                output(v);
+            }
+            default: {
+                output(-1);
+            }
+        };
+
+        // 测试 3: select send + default
+        let ch3: channel<int, 2>;
+
+        select {
+            case ch3.send(100): {
+                output(100);
+            }
+            default: {
+                output(-2);
+            }
+        };
+
+        // 验证 ch3 确实收到了 100
+        let val3, ok3 = ch3.recv();
+        output(val3);
+
+        // 测试 4: select with multiple cases — first channel has data
+        let chA: channel<int, 4>;
+        let chB: channel<int, 4>;
+        chA.send(10);
+        chB.send(20);
+
+        select {
+            case a = chA.recv(): {
+                output(a);
+            }
+            case b = chB.recv(): {
+                output(b);
+            }
+            default: {
+                output(-3);
+            }
+        };
+
+        // 测试 5: select send on full channel hits default
+        let ch4: channel<int, 1>;
+        ch4.send(77);
+
+        select {
+            case ch4.send(88): {
+                output(88);
+            }
+            default: {
+                output(-4);
+            }
+        };
+    }
+}

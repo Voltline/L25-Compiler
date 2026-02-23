@@ -833,6 +833,15 @@ void ensureContainerRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_channel_closed",
             llvm::FunctionType::get(llvm::Type::getInt32Ty(ctx.context), {i8PtrTy}, false));
     }
+    // non-blocking try_send / try_recv for select
+    if (!ctx.module.getFunction("l25_channel_try_send")) {
+        ctx.module.getOrInsertFunction("l25_channel_try_send",
+            llvm::FunctionType::get(llvm::Type::getInt32Ty(ctx.context), {i8PtrTy, i8PtrTy}, false));
+    }
+    if (!ctx.module.getFunction("l25_channel_try_recv")) {
+        ctx.module.getOrInsertFunction("l25_channel_try_recv",
+            llvm::FunctionType::get(llvm::Type::getInt32Ty(ctx.context), {i8PtrTy, i8PtrTy}, false));
+    }
 }
 
 uint64_t getTypeAllocSize(const TypeInfo& typeInfo, CodeGenContext& ctx)

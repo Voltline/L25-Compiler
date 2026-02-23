@@ -10,6 +10,9 @@ struct SpawnStmt;
 struct BreakStmt;
 struct ChannelRecvStmt;
 struct ForRangeChannelStmt;
+struct SelectStmt;
+struct SelectCase;
+enum class SelectCaseKind;
 }
 
 %{
@@ -75,6 +78,8 @@ extern Program* rootProgram;
     TypeInfo* typeInfo;  // 类型信息
     Func* nestedFuncStmt; // 嵌套函数定义语句
     std::vector<std::unique_ptr<Expr>>* arraySubscriptList; // 数组访问专用下标列表
+    SelectCase* selectCase;
+    std::vector<std::unique_ptr<SelectCase>>* selectCaseList;
 }
 
 %debug
@@ -114,6 +119,8 @@ extern Program* rootProgram;
 %type <stmt> scanf_stmt
 %type <funcCallStmt> func_call // 特殊处理
 %type <nestedFuncStmt> nested_func_stmt
+%type <selectCase> select_case
+%type <selectCaseList> select_case_list
 
 %type <expr> expr
 %type <expr> term
@@ -135,7 +142,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM IMPORT
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM IMPORT SELECT CASE DEFAULT
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN IN
 %token PRINTF SCANF
@@ -511,6 +518,13 @@ input_arg_list:
 
 stmt:
     declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | for_range_channel_stmt | channel_recv_stmt | input_stmt | output_stmt | printf_stmt | scanf_stmt
+    | SELECT LBRACE select_case_list RBRACE
+    {
+        $$ = new SelectStmt(std::move(*$3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+        delete $3;
+    }
     | RETURN expr
     {
         $$ = new ReturnStmt(std::unique_ptr<Expr>($2));
@@ -756,6 +770,65 @@ for_range_channel_stmt:
         $$->column = @1.first_column;
         delete $2;
         delete $4;
+    }
+    ;
+
+select_case_list:
+    select_case
+    {
+        $$ = new std::vector<std::unique_ptr<SelectCase>>();
+        $$->push_back(std::unique_ptr<SelectCase>($1));
+    }
+    | select_case_list select_case
+    {
+        $$ = $1;
+        $$->push_back(std::unique_ptr<SelectCase>($2));
+    }
+    ;
+
+select_case:
+    CASE IDENT ASSIGN factor DOT IDENT LPAREN RPAREN COLON LBRACE stmt_list RBRACE
+    {
+        /* case val = ch.recv(): { ... } */
+        std::string method(*$6);
+        if (method != "recv") {
+            yyerror(("select case: expected 'recv', got '" + method + "'").c_str());
+            YYERROR;
+        }
+        $$ = new SelectCase();
+        $$->kind = SelectCaseKind::Recv;
+        $$->recvVarName = *$2;
+        $$->channel = std::unique_ptr<Expr>($4);
+        $$->body = std::unique_ptr<StmtList>($11);
+        delete $2;
+        delete $6;
+    }
+    | CASE factor DOT IDENT LPAREN arg_list RPAREN COLON LBRACE stmt_list RBRACE
+    {
+        /* case ch.send(expr): { ... } */
+        std::string method(*$4);
+        if (method != "send") {
+            yyerror(("select case: expected 'send', got '" + method + "'").c_str());
+            YYERROR;
+        }
+        $$ = new SelectCase();
+        $$->kind = SelectCaseKind::Send;
+        $$->channel = std::unique_ptr<Expr>($2);
+        if ($6->args.size() != 1) {
+            yyerror("select case send: expected exactly 1 argument");
+            YYERROR;
+        }
+        $$->sendValue = std::move($6->args[0]);
+        $$->body = std::unique_ptr<StmtList>($10);
+        delete $4;
+        delete $6;
+    }
+    | DEFAULT COLON LBRACE stmt_list RBRACE
+    {
+        /* default: { ... } */
+        $$ = new SelectCase();
+        $$->kind = SelectCaseKind::Default;
+        $$->body = std::unique_ptr<StmtList>($4);
     }
     ;
 

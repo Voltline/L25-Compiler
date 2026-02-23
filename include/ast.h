@@ -489,6 +489,35 @@ struct ForRangeChannelStmt: public Stmt
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };
 
+// select case 类型
+enum class SelectCaseKind {
+    Recv,    // case val = ch.recv(): { ... }
+    Send,    // case ch.send(expr): { ... }
+    Default, // default: { ... }
+};
+
+// select 分支
+struct SelectCase {
+    SelectCaseKind kind;
+    std::unique_ptr<Expr> channel;    // channel 表达式 (Recv/Send)
+    std::string recvVarName;          // recv 时的变量名
+    std::unique_ptr<Expr> sendValue;  // send 时的值表达式
+    std::unique_ptr<StmtList> body;   // 分支体
+    TypeInfo channelTypeInfo;         // channel 的类型信息
+    Scope* bodyScope = nullptr;
+};
+
+// select 语句: select { case val = ch.recv(): { ... } case ch.send(x): { ... } default: { ... } }
+struct SelectStmt: public Stmt
+{
+    std::vector<std::unique_ptr<SelectCase>> cases;
+
+    explicit SelectStmt(std::vector<std::unique_ptr<SelectCase>> cases);
+
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
 // spawn 语句（goroutine-like 并发块）
 struct SpawnStmt: public Stmt
 {

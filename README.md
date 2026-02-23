@@ -529,6 +529,41 @@ program stdlib_demo {
 ```
 &emsp; `import std;` enables the standard library functions under the `std` namespace. Available functions: `std.clock_ms()` (returns `float` milliseconds), `std.sleep_ms(ms)`, `std.exit(code)`, `std.rand()` (returns `int`), and `std.srand(seed)`. This prevents naming conflicts between user-defined functions and built-in ones. Without `import std;`, calling `std.xxx()` will produce a semantic error.
 
+* 🔀 *Go-style `select` statement for channel multiplexing*:
+```L25
+program select_demo {
+    main {
+        let ch1: channel<int, 4>;
+        let ch2: channel<int, 4>;
+        ch1.send(42);
+
+        select {
+            case v = ch1.recv(): {
+                output(v);          // 42
+            }
+            case w = ch2.recv(): {
+                output(w);
+            }
+            default: {
+                output(-1);
+            }
+        };
+
+        // send case
+        let ch3: channel<int, 2>;
+        select {
+            case ch3.send(100): {
+                output(100);        // 100
+            }
+            default: {
+                output(0);
+            }
+        };
+    }
+}
+```
+&emsp; `select { ... }` multiplexes over multiple channel operations, Go-style. Each `case` is either a `recv` (`case val = ch.recv(): { ... }`) or a `send` (`case ch.send(expr): { ... }`). An optional `default` branch runs when no channel operation is immediately ready. Without `default`, the statement spins (with `sched_yield`) until one case succeeds. Only buffered channels support non-blocking `try_send`/`try_recv`; unbuffered channels should be used with a `default` branch to avoid spinning indefinitely.
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -749,6 +784,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <invoke_stmt>
     | <nested_func_stmt>
     | <spawn_stmt>
+    | <select_stmt>
     | <printf_stmt>
     | <scanf_stmt>
     | "break"
@@ -876,6 +912,17 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 
 <spawn_stmt> =
     "spawn" "{" <stmt_list> "}"
+
+<select_stmt> =
+    "select" "{" <select_case_list> "}"
+
+<select_case_list> =
+    <select_case> { <select_case> }
+
+<select_case> =
+      "case" <ident> "=" <factor> "." "recv" "(" ")" ":" "{" <stmt_list> "}"
+    | "case" <factor> "." "send" "(" <arg_list> ")" ":" "{" <stmt_list> "}"
+    | "default" ":" "{" <stmt_list> "}"
 
 <type_info> =
       <base_type>

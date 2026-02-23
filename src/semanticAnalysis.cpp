@@ -556,6 +556,59 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         }
         loopDepth--;
         exitScope();
+    } else if (auto selectStmt = dynamic_cast<SelectStmt*>(&stmt)) {
+        // select { case val = ch.recv(): { ... } case ch.send(x): { ... } default: { ... } }
+        bool hasDefault = false;
+        for (auto& c : selectStmt->cases) {
+            if (c->kind == SelectCaseKind::Default) {
+                if (hasDefault) {
+                    reportError(*selectStmt, "select 语句只能有一个 default 分支");
+                }
+                hasDefault = true;
+                // default 分支只有 body
+                enterScope();
+                c->bodyScope = currentScope;
+                for (auto& s : c->body->stmts) {
+                    analyzeStmt(*s);
+                }
+                exitScope();
+            } else {
+                // Recv 或 Send：分析 channel 表达式
+                analyzeExpr(*c->channel);
+                // 获取 channel 类型信息
+                if (auto chIdent = dynamic_cast<IdentExpr*>(c->channel.get())) {
+                    SymbolInfo* chSym = currentScope->lookup(chIdent->ident);
+                    if (chSym && chSym->kind == SymbolKind::Channel) {
+                        c->channelTypeInfo = TypeInfo{ SymbolKind::Channel, {}, 0, false };
+                        c->channelTypeInfo.typeParams = chSym->typeParams;
+                    } else {
+                        reportError(*selectStmt, "select case 需要 channel 类型");
+                    }
+                }
+
+                if (c->kind == SelectCaseKind::Send) {
+                    // 分析 send 的值表达式
+                    analyzeExpr(*c->sendValue);
+                }
+
+                // 进入 body 作用域
+                enterScope();
+                c->bodyScope = currentScope;
+
+                if (c->kind == SelectCaseKind::Recv) {
+                    // 声明 recv 变量
+                    TypeInfo valType = c->channelTypeInfo.typeParams.empty()
+                                         ? TypeInfo{ SymbolKind::Int, {}, 0, false }
+                                         : c->channelTypeInfo.typeParams[0];
+                    declareSymbol(c->recvVarName, SymbolInfo{ c->recvVarName, valType });
+                }
+
+                for (auto& s : c->body->stmts) {
+                    analyzeStmt(*s);
+                }
+                exitScope();
+            }
+        }
     }
 }
 

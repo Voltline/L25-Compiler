@@ -1184,3 +1184,220 @@ llvm::Value* DeleteStmt::codeGen(CodeGenContext& ctx) const
 
     return nullptr;
 }
+
+// ===== Select 语句 =====
+SelectStmt::SelectStmt(std::vector<std::unique_ptr<SelectCase>> cases)
+    : cases(std::move(cases)) {}
+
+void SelectStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Select" << std::endl;
+    for (auto& c : cases) {
+        std::string kindStr;
+        switch (c->kind) {
+            case SelectCaseKind::Recv: kindStr = "Recv(" + c->recvVarName + ")"; break;
+            case SelectCaseKind::Send: kindStr = "Send"; break;
+            case SelectCaseKind::Default: kindStr = "Default"; break;
+        }
+        std::cout << std::string(indent + 2, ' ') << "Case: " << kindStr << std::endl;
+        if (c->channel) c->channel->print(indent + 4);
+        if (c->sendValue) c->sendValue->print(indent + 4);
+        if (c->body) c->body->print(indent + 4);
+    }
+}
+
+llvm::Value* SelectStmt::codeGen(CodeGenContext& ctx) const
+{
+    ensureContainerRuntimeDeclared(ctx);
+
+    llvm::Function* function = ctx.builder.GetInsertBlock()->getParent();
+    llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* i32Ty   = llvm::Type::getInt32Ty(ctx.context);
+
+    // 寻找 default 分支
+    int defaultIdx = -1;
+    for (int i = 0; i < (int)cases.size(); ++i) {
+        if (cases[i]->kind == SelectCaseKind::Default) {
+            defaultIdx = i;
+            break;
+        }
+    }
+
+    // 声明 sched_yield (for spin loop without default)
+    if (!ctx.module.getFunction("sched_yield")) {
+        ctx.module.getOrInsertFunction("sched_yield",
+            llvm::FunctionType::get(i32Ty, {}, false));
+    }
+    llvm::Function* schedYieldFn = ctx.module.getFunction("sched_yield");
+
+    // 创建基本块
+    llvm::BasicBlock* loopBlock  = llvm::BasicBlock::Create(ctx.context, "select.loop", function);
+    llvm::BasicBlock* afterBlock = llvm::BasicBlock::Create(ctx.context, "select.after", function);
+
+    // 为每个 non-default case 创建 try 和 body 块
+    struct CaseBlocks {
+        llvm::BasicBlock* tryBlock;
+        llvm::BasicBlock* bodyBlock;
+    };
+    std::vector<CaseBlocks> caseBlocks;
+    for (int i = 0; i < (int)cases.size(); ++i) {
+        if (cases[i]->kind == SelectCaseKind::Default) {
+            caseBlocks.push_back({nullptr, nullptr});
+            continue;
+        }
+        auto* tryBB  = llvm::BasicBlock::Create(ctx.context, "select.try." + std::to_string(i), function);
+        auto* bodyBB = llvm::BasicBlock::Create(ctx.context, "select.body." + std::to_string(i), function);
+        caseBlocks.push_back({tryBB, bodyBB});
+    }
+
+    // default body block
+    llvm::BasicBlock* defaultBodyBlock = nullptr;
+    if (defaultIdx >= 0) {
+        defaultBodyBlock = llvm::BasicBlock::Create(ctx.context, "select.default", function);
+    }
+
+    // 跳转到 loopBlock
+    ctx.builder.CreateBr(loopBlock);
+    ctx.builder.SetInsertPoint(loopBlock);
+    ctx.currentBlock = loopBlock;
+
+    // 找到第一个 non-default case
+    int firstNonDefault = -1;
+    for (int i = 0; i < (int)cases.size(); ++i) {
+        if (cases[i]->kind != SelectCaseKind::Default) {
+            firstNonDefault = i;
+            break;
+        }
+    }
+
+    if (firstNonDefault >= 0) {
+        ctx.builder.CreateBr(caseBlocks[firstNonDefault].tryBlock);
+    } else {
+        // 只有 default
+        ctx.builder.CreateBr(defaultBodyBlock);
+    }
+
+    // 生成每个 non-default case 的 try 块
+    for (int i = 0; i < (int)cases.size(); ++i) {
+        if (cases[i]->kind == SelectCaseKind::Default) continue;
+
+        ctx.builder.SetInsertPoint(caseBlocks[i].tryBlock);
+        ctx.currentBlock = caseBlocks[i].tryBlock;
+
+        llvm::Value* chPtr = cases[i]->channel->codeGen(ctx);
+
+        TypeInfo elemType = cases[i]->channelTypeInfo.typeParams.empty()
+                              ? TypeInfo{ SymbolKind::Int, {}, 0, false }
+                              : cases[i]->channelTypeInfo.typeParams[0];
+        llvm::Type* elemLLVMTy = typeInfoToLLVMValueType(elemType, ctx.context);
+
+        // 找到下一个要尝试的块
+        llvm::BasicBlock* nextTry = nullptr;
+        for (int j = i + 1; j < (int)cases.size(); ++j) {
+            if (cases[j]->kind != SelectCaseKind::Default) {
+                nextTry = caseBlocks[j].tryBlock;
+                break;
+            }
+        }
+        // 如果没有下一个 non-default case，回退到 default 或 yield+loop
+        llvm::BasicBlock* failBlock = nullptr;
+        if (nextTry) {
+            failBlock = nextTry;
+        } else if (defaultBodyBlock) {
+            failBlock = defaultBodyBlock;
+        } else {
+            // 需要 yield block 然后回到 loopBlock
+            failBlock = llvm::BasicBlock::Create(ctx.context, "select.yield", function);
+        }
+
+        if (cases[i]->kind == SelectCaseKind::Recv) {
+            llvm::AllocaInst* out = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "sel.recv.out");
+            llvm::Value* outCast = ctx.builder.CreateBitCast(out, i8PtrTy);
+            llvm::Function* tryRecvFn = ctx.module.getFunction("l25_channel_try_recv");
+            llvm::Value* okVal = ctx.builder.CreateCall(tryRecvFn, {chPtr, outCast}, "sel.try.recv");
+            llvm::Value* okBool = ctx.builder.CreateICmpNE(okVal, llvm::ConstantInt::get(i32Ty, 0));
+            ctx.builder.CreateCondBr(okBool, caseBlocks[i].bodyBlock, failBlock);
+
+            // body 块
+            ctx.builder.SetInsertPoint(caseBlocks[i].bodyBlock);
+            ctx.currentBlock = caseBlocks[i].bodyBlock;
+
+            llvm::Value* recvVal = ctx.builder.CreateLoad(elemLLVMTy, out, "sel.recv.val");
+            SymbolInfo* valSym = cases[i]->bodyScope ? cases[i]->bodyScope->lookupLocal(cases[i]->recvVarName) : nullptr;
+            llvm::AllocaInst* valAlloca = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, cases[i]->recvVarName);
+            ctx.builder.CreateStore(recvVal, valAlloca);
+            if (valSym) valSym->addr = valAlloca;
+
+            if (elemType.pointerLevel > 0 || elemType.kind == SymbolKind::Class) {
+                auto* gcPushFn = ctx.module.getFunction("l25_gc_root_push");
+                if (gcPushFn) {
+                    llvm::Value* slotCast = ctx.builder.CreateBitCast(valAlloca,
+                        llvm::PointerType::get(llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0), 0));
+                    ctx.builder.CreateCall(gcPushFn, {slotCast});
+                    ctx.registerCleanup(valAlloca, CleanupKind::GCRoot);
+                }
+            }
+
+            ctx.pushCleanupScope();
+            cases[i]->body->codeGen(ctx);
+            if (!ctx.currentBlock->getTerminator()) {
+                emitScopeCleanup(ctx);
+                ctx.builder.CreateBr(afterBlock);
+            } else {
+                ctx.popCleanupScope();
+            }
+
+        } else if (cases[i]->kind == SelectCaseKind::Send) {
+            llvm::Value* sendVal = cases[i]->sendValue->codeGen(ctx);
+            llvm::AllocaInst* sendBuf = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "sel.send.buf");
+            ctx.builder.CreateStore(sendVal, sendBuf);
+            llvm::Value* sendCast = ctx.builder.CreateBitCast(sendBuf, i8PtrTy);
+            llvm::Function* trySendFn = ctx.module.getFunction("l25_channel_try_send");
+            llvm::Value* okVal = ctx.builder.CreateCall(trySendFn, {chPtr, sendCast}, "sel.try.send");
+            llvm::Value* okBool = ctx.builder.CreateICmpNE(okVal, llvm::ConstantInt::get(i32Ty, 0));
+            ctx.builder.CreateCondBr(okBool, caseBlocks[i].bodyBlock, failBlock);
+
+            // body 块
+            ctx.builder.SetInsertPoint(caseBlocks[i].bodyBlock);
+            ctx.currentBlock = caseBlocks[i].bodyBlock;
+
+            ctx.pushCleanupScope();
+            cases[i]->body->codeGen(ctx);
+            if (!ctx.currentBlock->getTerminator()) {
+                emitScopeCleanup(ctx);
+                ctx.builder.CreateBr(afterBlock);
+            } else {
+                ctx.popCleanupScope();
+            }
+        }
+
+        // 如果 failBlock 是一个 yield block（无 default、无 nextTry），填充它
+        if (!nextTry && !defaultBodyBlock) {
+            ctx.builder.SetInsertPoint(failBlock);
+            ctx.currentBlock = failBlock;
+            ctx.builder.CreateCall(schedYieldFn);
+            ctx.builder.CreateBr(loopBlock);
+        }
+    }
+
+    // 生成 default body 块
+    if (defaultIdx >= 0 && defaultBodyBlock) {
+        ctx.builder.SetInsertPoint(defaultBodyBlock);
+        ctx.currentBlock = defaultBodyBlock;
+
+        ctx.pushCleanupScope();
+        cases[defaultIdx]->body->codeGen(ctx);
+        if (!ctx.currentBlock->getTerminator()) {
+            emitScopeCleanup(ctx);
+            ctx.builder.CreateBr(afterBlock);
+        } else {
+            ctx.popCleanupScope();
+        }
+    }
+
+    // afterBlock
+    ctx.builder.SetInsertPoint(afterBlock);
+    ctx.currentBlock = afterBlock;
+
+    return nullptr;
+}
