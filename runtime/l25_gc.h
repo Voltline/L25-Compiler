@@ -50,6 +50,28 @@ void l25_gc_free(void* ptr);
 // 写屏障（线程安全）
 void l25_gc_write_barrier(void* new_ptr);
 
+// ===== GC 监测 API =====
+// 获取当前存活的 GC 对象数量
+int32_t l25_gc_count(void);
+// 获取当前 GC 管理的已分配字节数
+int64_t l25_gc_bytes(void);
+// 获取当前 GC 触发阈值（字节）
+int64_t l25_gc_threshold(void);
+// 设置 GC 触发阈值（字节）
+void    l25_gc_set_threshold(int64_t bytes);
+// 获取自初始化以来的总分配次数
+int64_t l25_gc_total_allocs(void);
+// 获取自初始化以来的总回收周期数
+int64_t l25_gc_total_collections(void);
+// 获取自初始化以来被释放的总字节数
+int64_t l25_gc_total_freed(void);
+// 打印详细 GC 统计到 stderr
+void    l25_gc_stats(void);
+// 暂停 GC（禁止自动触发，手动 collect 仍可用）
+void    l25_gc_pause(void);
+// 恢复 GC
+void    l25_gc_resume(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -200,6 +200,12 @@ llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const
     std::string funcLLVMName = funcSymbol->llvmName;
     llvm::Function* calleeFunc = ctx.module.getFunction(funcLLVMName);
 
+    // 内置函数：确保 LLVM 声明存在
+    if (funcSymbol->isBuiltin && !calleeFunc) {
+        ensureGCRuntimeDeclared(ctx);
+        calleeFunc = ctx.module.getFunction(funcLLVMName);
+    }
+
     std::vector<llvm::Value*> argsV;
     if (args) {
         int idx = 0;
@@ -207,7 +213,13 @@ llvm::Value* FuncCallStmt::codeGen(CodeGenContext& ctx) const
             llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
 
-            if (idx < static_cast<int>(funcSymbol->paramTypes.size())) {
+            if (funcSymbol->isBuiltin && calleeFunc) {
+                // 内置函数：使用 LLVM 函数签名的参数类型进行 cast
+                auto* fnTy = calleeFunc->getFunctionType();
+                if (idx < static_cast<int>(fnTy->getNumParams())) {
+                    argVal = castValueToType(argVal, fnTy->getParamType(idx), ctx);
+                }
+            } else if (idx < static_cast<int>(funcSymbol->paramTypes.size())) {
                 const TypeInfo& expected = funcSymbol->paramTypes[idx];
                 llvm::Type* expectedType = expected.kind == SymbolKind::Array
                     ? typeInfoToLLVMType(expected, ctx.context, true)
@@ -275,6 +287,12 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
     std::string funcLLVMName = funcSymbol->llvmName;
     llvm::Function* calleeFunc = ctx.module.getFunction(funcLLVMName);
 
+    // 内置函数：确保 LLVM 声明存在
+    if (funcSymbol->isBuiltin && !calleeFunc) {
+        ensureGCRuntimeDeclared(ctx);
+        calleeFunc = ctx.module.getFunction(funcLLVMName);
+    }
+
     std::vector<llvm::Value*> argsV;
     if (args) {
         int idx = 0;
@@ -282,7 +300,13 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
             llvm::Value* argVal = argExpr->codeGen(ctx);
             if (!argVal) return nullptr;
 
-            if (idx < static_cast<int>(funcSymbol->paramTypes.size())) {
+            if (funcSymbol->isBuiltin && calleeFunc) {
+                // 内置函数：使用 LLVM 函数签名的参数类型进行 cast
+                auto* fnTy = calleeFunc->getFunctionType();
+                if (idx < static_cast<int>(fnTy->getNumParams())) {
+                    argVal = castValueToType(argVal, fnTy->getParamType(idx), ctx);
+                }
+            } else if (idx < static_cast<int>(funcSymbol->paramTypes.size())) {
                 const TypeInfo& expected = funcSymbol->paramTypes[idx];
                 llvm::Type* expectedType = expected.kind == SymbolKind::Array
                     ? typeInfoToLLVMType(expected, ctx.context, true)
@@ -306,5 +330,12 @@ llvm::Value* FuncCallExpr::codeGen(CodeGenContext& ctx) const
         }
     }
 
-    return ctx.builder.CreateCall(calleeFunc, argsV, funcName + "_call");
+    llvm::Value* result = ctx.builder.CreateCall(calleeFunc, argsV, funcName + "_call");
+
+    // 内置函数返回 i64 但 L25 int 是 i32：截断
+    if (funcSymbol->isBuiltin && result->getType()->isIntegerTy(64)) {
+        result = ctx.builder.CreateTrunc(result, llvm::Type::getInt32Ty(ctx.context), funcName + "_trunc");
+    }
+
+    return result;
 }

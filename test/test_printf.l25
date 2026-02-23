@@ -1,0 +1,15 @@
+// 测试 printf 和 scanf（无 scanf 交互测试，仅测 printf）
+program printf_test {
+    main {
+        let x: int = 42;
+        let y: float = 3.14;
+        let s: string = "hello";
+
+        // C 风格格式化输出
+        printf("%d\n", x);
+        printf("%f\n", y);
+        printf("%s world\n", s);
+        printf("x=%d, y=%f, s=%s\n", x, y, s);
+        printf("no args\n");
+    }
+}

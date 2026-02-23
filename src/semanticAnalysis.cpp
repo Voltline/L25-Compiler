@@ -46,6 +46,35 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     SymbolInfo progInfo{ SymbolKind::Program, program.name->ident };
     declareSymbol(program.name->ident, progInfo);
 
+    // ===== 注册内置函数 =====
+    auto registerBuiltin = [&](const std::string& name, const std::string& llvmName,
+                               const std::vector<TypeInfo>& params, TypeInfo retType) {
+        SymbolInfo info(SymbolKind::Function, name);
+        info.kind = SymbolKind::Function;
+        info.llvmName = llvmName;
+        info.paramTypes = params;
+        info.returnType = retType;
+        info.isBuiltin = true;
+        declareSymbol(name, info);
+    };
+
+    TypeInfo voidType(SymbolKind::Invalid, {});
+    TypeInfo intType(SymbolKind::Int, {});
+    TypeInfo int64Type(SymbolKind::Int, {}); // int 即 i32，但 GC 返回 i64 → codegen 做 trunc
+
+    // GC 监测函数
+    registerBuiltin("gc_stats",     "l25_gc_stats",     {}, voidType);
+    registerBuiltin("gc_count",     "l25_gc_count",     {}, intType);
+    registerBuiltin("gc_bytes",     "l25_gc_bytes",     {}, intType);
+    registerBuiltin("gc_threshold", "l25_gc_threshold", {}, intType);
+    registerBuiltin("gc_set_threshold", "l25_gc_set_threshold", {intType}, voidType);
+    registerBuiltin("gc_total_allocs",     "l25_gc_total_allocs",     {}, intType);
+    registerBuiltin("gc_total_collections","l25_gc_total_collections",{}, intType);
+    registerBuiltin("gc_total_freed",      "l25_gc_total_freed",      {}, intType);
+    registerBuiltin("gc_collect",   "l25_gc_collect",   {}, voidType);
+    registerBuiltin("gc_pause",     "l25_gc_pause",     {}, voidType);
+    registerBuiltin("gc_resume",    "l25_gc_resume",    {}, voidType);
+
     // 先注册类符号
     for (auto& cls : program.classes) {
         const std::string& className = cls->name->ident;
@@ -362,6 +391,32 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
         for (const auto& expr: outputStmt->idents) {
             analyzeExpr(*expr);
         }
+    } else if (auto printfStmt = dynamic_cast<const PrintfStmt*>(&stmt)) {
+        if (printfStmt->idents.empty()) {
+            reportError(*printfStmt, "printf 至少需要一个格式字符串参数");
+            return;
+        }
+        for (const auto& expr : printfStmt->idents) {
+            analyzeExpr(*expr);
+        }
+    } else if (auto scanfStmt = dynamic_cast<const ScanfStmt*>(&stmt)) {
+        if (scanfStmt->idents.empty()) {
+            reportError(*scanfStmt, "scanf 至少需要一个格式字符串参数");
+            return;
+        }
+        analyzeExpr(*scanfStmt->idents[0]); // 格式串
+        for (size_t i = 1; i < scanfStmt->idents.size(); i++) {
+            const auto& ident = scanfStmt->idents[i];
+            if (const auto* idExpr = dynamic_cast<IdentExpr*>(ident.get())) {
+                if (!checkSymbolExists(idExpr->ident)) {
+                    reportError(*idExpr, "变量未声明：" + idExpr->ident);
+                }
+            } else if (auto* arraySubscriptExpr = dynamic_cast<ArraySubscriptExpr*>(ident.get())) {
+                analyzeExpr(*arraySubscriptExpr);
+            } else {
+                reportError(*ident, "scanf 参数必须是变量或数组元素");
+            }
+        }
     } else if (auto funcDefStmt = dynamic_cast<Func*>(&stmt)) {
         const std::string& funcName = funcDefStmt->name->ident;
 
@@ -450,24 +505,33 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         }
         // 函数符号
         SymbolInfo* funcSymbol{ currentScope->lookup(funcCallExpr->name->ident) };
-        if (!funcCallExpr->args) {
-            if (!funcSymbol->paramTypes.empty()) {
-                reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，但调用时未传入参数" );
-                return;
-            }
-        }
-
-        if (funcCallExpr->args) {
-            if (funcCallExpr->args->args.size() != funcSymbol->paramTypes.size()) {
-                reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，但调用时传入" + std::to_string(funcCallExpr->args->args.size()) + "个参数");
+        if (!funcSymbol->isBuiltin) {
+            if (!funcCallExpr->args) {
+                if (!funcSymbol->paramTypes.empty()) {
+                    reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，但调用时未传入参数" );
                     return;
+                }
             }
-            // TODO: 加上参数对应类型检查，这里还有数组传入的问题
-            for (size_t i = 0; i < funcCallExpr->args->args.size(); ++i) {
-                const auto& expr = funcCallExpr->args->args[i];
-                analyzeExpr(*expr);
-                if (i < funcSymbol->paramTypes.size()) {
-                    warnZeroAsNil(*funcCallExpr, funcSymbol->paramTypes[i], expr.get());
+
+            if (funcCallExpr->args) {
+                if (funcCallExpr->args->args.size() != funcSymbol->paramTypes.size()) {
+                    reportError(*funcCallExpr, "函数调用参数数量不匹配：" + funcCallExpr->name->ident + " 调用需要" + std::to_string(funcSymbol->paramTypes.size()) + "个参数，但调用时传入" + std::to_string(funcCallExpr->args->args.size()) + "个参数");
+                        return;
+                }
+                // TODO: 加上参数对应类型检查，这里还有数组传入的问题
+                for (size_t i = 0; i < funcCallExpr->args->args.size(); ++i) {
+                    const auto& expr = funcCallExpr->args->args[i];
+                    analyzeExpr(*expr);
+                    if (i < funcSymbol->paramTypes.size()) {
+                        warnZeroAsNil(*funcCallExpr, funcSymbol->paramTypes[i], expr.get());
+                    }
+                }
+            }
+        } else {
+            // 内置函数：仍需分析参数表达式
+            if (funcCallExpr->args) {
+                for (const auto& expr : funcCallExpr->args->args) {
+                    analyzeExpr(*expr);
                 }
             }
         }

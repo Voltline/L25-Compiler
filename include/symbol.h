@@ -68,6 +68,7 @@ struct SymbolInfo
     std::vector<std::pair<std::string, TypeInfo>> classFields; // 记录字段布局
     std::unordered_map<std::string, std::vector<TypeInfo>> methodParamTypes; // 方法参数类型
     std::unordered_map<std::string, TypeInfo> methodReturnTypes; // 方法返回类型
+    bool isBuiltin = false;              // 是否为内置函数（skip arg count check for variadic builtins）
     
     SymbolInfo(SymbolKind kind, const std::string& name);
     SymbolInfo(const std::string& name, const TypeInfo& type);

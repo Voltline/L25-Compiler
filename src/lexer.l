@@ -63,6 +63,8 @@ ident {letter}({letter}|[0-9])*
 "queue"     { updateLocationAndColumn(); return QUEUE; }
 "channel"   { updateLocationAndColumn(); return CHANNEL; }
 "spawn"     { updateLocationAndColumn(); return SPAWN; }
+"printf"    { updateLocationAndColumn(); return PRINTF; }
+"scanf"     { updateLocationAndColumn(); return SCANF; }
 
 {floatnumber} { updateLocationAndColumn(); yylval.fnum = atof(yytext); return FLOATNUMBER; }
 {number}    { updateLocationAndColumn(); yylval.num = atoi(yytext); return NUMBER; }

@@ -944,6 +944,59 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_gc_thread_fini",
             llvm::FunctionType::get(voidTy, {}, false));
     }
+
+    // ===== GC 监测函数 =====
+    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+    // l25_gc_count() → i32
+    if (!ctx.module.getFunction("l25_gc_count")) {
+        ctx.module.getOrInsertFunction("l25_gc_count",
+            llvm::FunctionType::get(i32Ty, {}, false));
+    }
+    // l25_gc_bytes() → i64
+    if (!ctx.module.getFunction("l25_gc_bytes")) {
+        ctx.module.getOrInsertFunction("l25_gc_bytes",
+            llvm::FunctionType::get(i64Ty, {}, false));
+    }
+    // l25_gc_threshold() → i64
+    if (!ctx.module.getFunction("l25_gc_threshold")) {
+        ctx.module.getOrInsertFunction("l25_gc_threshold",
+            llvm::FunctionType::get(i64Ty, {}, false));
+    }
+    // l25_gc_set_threshold(i64)
+    if (!ctx.module.getFunction("l25_gc_set_threshold")) {
+        ctx.module.getOrInsertFunction("l25_gc_set_threshold",
+            llvm::FunctionType::get(voidTy, {i64Ty}, false));
+    }
+    // l25_gc_total_allocs() → i64
+    if (!ctx.module.getFunction("l25_gc_total_allocs")) {
+        ctx.module.getOrInsertFunction("l25_gc_total_allocs",
+            llvm::FunctionType::get(i64Ty, {}, false));
+    }
+    // l25_gc_total_collections() → i64
+    if (!ctx.module.getFunction("l25_gc_total_collections")) {
+        ctx.module.getOrInsertFunction("l25_gc_total_collections",
+            llvm::FunctionType::get(i64Ty, {}, false));
+    }
+    // l25_gc_total_freed() → i64
+    if (!ctx.module.getFunction("l25_gc_total_freed")) {
+        ctx.module.getOrInsertFunction("l25_gc_total_freed",
+            llvm::FunctionType::get(i64Ty, {}, false));
+    }
+    // l25_gc_stats(void)
+    if (!ctx.module.getFunction("l25_gc_stats")) {
+        ctx.module.getOrInsertFunction("l25_gc_stats",
+            llvm::FunctionType::get(voidTy, {}, false));
+    }
+    // l25_gc_pause(void)
+    if (!ctx.module.getFunction("l25_gc_pause")) {
+        ctx.module.getOrInsertFunction("l25_gc_pause",
+            llvm::FunctionType::get(voidTy, {}, false));
+    }
+    // l25_gc_resume(void)
+    if (!ctx.module.getFunction("l25_gc_resume")) {
+        ctx.module.getOrInsertFunction("l25_gc_resume",
+            llvm::FunctionType::get(voidTy, {}, false));
+    }
 }
 
 // ===== 根栈 push（通过函数调用，线程安全） =====

@@ -58,6 +58,12 @@ typedef struct {
     GCObject*  gray_list;        // 灰色队列链表头
     GCObject*  sweep_cursor;     // sweep 阶段的当前遍历位置
     GCObject** sweep_prev;       // sweep 阶段的前驱指针
+
+    // 监测统计
+    size_t     total_allocs;     // 总分配次数
+    size_t     total_collections;// 总 GC 回收周期数
+    size_t     total_freed;      // 总释放字节数
+    int        paused;           // GC 暂停标志（>0 表示暂停）
 } GCState;
 
 static GCState gc = {0};
@@ -101,6 +107,10 @@ void l25_gc_init(void) {
     gc.gray_list      = NULL;
     gc.sweep_cursor   = NULL;
     gc.sweep_prev     = NULL;
+    gc.total_allocs   = 0;
+    gc.total_collections = 0;
+    gc.total_freed    = 0;
+    gc.paused         = 0;
     all_roots_count   = 0;
     pthread_mutex_unlock(&gc_lock);
 
@@ -224,7 +234,9 @@ static void gc_sweep_free_step(size_t steps) {
             *gc.sweep_prev  = obj->next;
             gc.sweep_cursor = obj->next;
 
-            gc.bytes_allocated -= (sizeof(GCObject) + obj->size);
+            size_t freed_size = sizeof(GCObject) + obj->size;
+            gc.bytes_allocated -= freed_size;
+            gc.total_freed += freed_size;
             gc.object_count--;
             free(obj);
         } else {
@@ -249,6 +261,7 @@ static void gc_sweep_free_step(size_t steps) {
 
 // ===== 增量推进 =====
 static void gc_step(size_t steps) {
+    if (gc.paused) return;
     if (gc.phase == GC_PHASE_IDLE) {
         if (gc.bytes_allocated >= gc.next_gc) {
             gc_start_cycle();
@@ -304,6 +317,8 @@ static void gc_collect_locked(void) {
 
     // Phase 2: free
     gc_sweep_free_step(SIZE_MAX);
+
+    gc.total_collections++;
 }
 
 void l25_gc_collect(void) {
@@ -383,6 +398,7 @@ void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) 
 
     gc.bytes_allocated += sizeof(GCObject) + size;
     gc.object_count++;
+    gc.total_allocs++;
 
     void* result = get_user_ptr(o);
     pthread_mutex_unlock(&gc_lock);
@@ -469,5 +485,86 @@ void l25_gc_write_barrier(void* new_ptr) {
         GCObject* obj = get_header(new_ptr);
         shade_gray(obj);
     }
+    pthread_mutex_unlock(&gc_lock);
+}
+
+// ===== GC 监测 API =====
+int32_t l25_gc_count(void) {
+    pthread_mutex_lock(&gc_lock);
+    int32_t val = (int32_t)gc.object_count;
+    pthread_mutex_unlock(&gc_lock);
+    return val;
+}
+
+int64_t l25_gc_bytes(void) {
+    pthread_mutex_lock(&gc_lock);
+    int64_t val = (int64_t)gc.bytes_allocated;
+    pthread_mutex_unlock(&gc_lock);
+    return val;
+}
+
+int64_t l25_gc_threshold(void) {
+    pthread_mutex_lock(&gc_lock);
+    int64_t val = (int64_t)gc.next_gc;
+    pthread_mutex_unlock(&gc_lock);
+    return val;
+}
+
+void l25_gc_set_threshold(int64_t bytes) {
+    pthread_mutex_lock(&gc_lock);
+    if (bytes > 0) gc.next_gc = (size_t)bytes;
+    pthread_mutex_unlock(&gc_lock);
+}
+
+int64_t l25_gc_total_allocs(void) {
+    pthread_mutex_lock(&gc_lock);
+    int64_t val = (int64_t)gc.total_allocs;
+    pthread_mutex_unlock(&gc_lock);
+    return val;
+}
+
+int64_t l25_gc_total_collections(void) {
+    pthread_mutex_lock(&gc_lock);
+    int64_t val = (int64_t)gc.total_collections;
+    pthread_mutex_unlock(&gc_lock);
+    return val;
+}
+
+int64_t l25_gc_total_freed(void) {
+    pthread_mutex_lock(&gc_lock);
+    int64_t val = (int64_t)gc.total_freed;
+    pthread_mutex_unlock(&gc_lock);
+    return val;
+}
+
+void l25_gc_stats(void) {
+    pthread_mutex_lock(&gc_lock);
+    fprintf(stderr, "===== L25 GC Stats =====\n");
+    fprintf(stderr, "  Live objects:       %zu\n", gc.object_count);
+    fprintf(stderr, "  Bytes allocated:    %zu\n", gc.bytes_allocated);
+    fprintf(stderr, "  GC threshold:       %zu\n", gc.next_gc);
+    fprintf(stderr, "  Total allocations:  %zu\n", gc.total_allocs);
+    fprintf(stderr, "  Total collections:  %zu\n", gc.total_collections);
+    fprintf(stderr, "  Total freed bytes:  %zu\n", gc.total_freed);
+    fprintf(stderr, "  GC phase:           %s\n",
+        gc.phase == GC_PHASE_IDLE         ? "idle" :
+        gc.phase == GC_PHASE_MARKING      ? "marking" :
+        gc.phase == GC_PHASE_SWEEP_DTORS  ? "sweep-dtors" :
+        gc.phase == GC_PHASE_SWEEP_FREE   ? "sweep-free" : "unknown");
+    fprintf(stderr, "  Paused:             %s\n", gc.paused ? "yes" : "no");
+    fprintf(stderr, "  Active threads:     %d\n", all_roots_count);
+    fprintf(stderr, "========================\n");
+    pthread_mutex_unlock(&gc_lock);
+}
+
+void l25_gc_pause(void) {
+    pthread_mutex_lock(&gc_lock);
+    gc.paused++;
+    pthread_mutex_unlock(&gc_lock);
+}
+
+void l25_gc_resume(void) {
+    pthread_mutex_lock(&gc_lock);
+    if (gc.paused > 0) gc.paused--;
     pthread_mutex_unlock(&gc_lock);
 }

@@ -30,6 +30,8 @@ struct ForStmt;
 struct FuncCallStmt;
 struct InputStmt;
 struct OutputStmt;
+struct PrintfStmt;
+struct ScanfStmt;
 struct SpawnStmt;
 struct BreakStmt;
 struct Expr;
@@ -374,6 +376,30 @@ struct OutputStmt: public Stmt
     OutputStmt(std::vector<std::unique_ptr<Expr>> idents);
 
     OutputStmt(std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// printf 语句（C 风格格式化输出）
+struct PrintfStmt: public Stmt
+{
+    std::vector<std::unique_ptr<Expr>> idents;   // [0] = 格式串, [1..] = 参数
+
+    PrintfStmt(std::unique_ptr<ArgList> args);
+
+    void print(int indent = 0) const override;
+
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// scanf 语句（C 风格格式化输入）
+struct ScanfStmt: public Stmt
+{
+    std::vector<std::unique_ptr<Expr>> idents;   // [0] = 格式串, [1..] = 变量
+
+    ScanfStmt(std::unique_ptr<ArgList> args);
 
     void print(int indent = 0) const override;
 

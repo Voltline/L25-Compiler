@@ -736,6 +736,142 @@ llvm::Value* OutputStmt::codeGen(CodeGenContext& ctx) const {
     return nullptr;
 }
 
+// ===== printf 语句（C 风格格式化输出） =====
+PrintfStmt::PrintfStmt(std::unique_ptr<ArgList> args)
+    : idents(std::move(args->args)) {}
+
+void PrintfStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Printf" << std::endl;
+    for (const auto& ident: idents) {
+        ident->print(indent + 2);
+    }
+}
+
+llvm::Value* PrintfStmt::codeGen(CodeGenContext& ctx) const {
+    // 获取或声明 printf 函数
+    llvm::Function* printfFunc = ctx.module.getFunction("printf");
+    if (!printfFunc) {
+        llvm::FunctionType* printfType = llvm::FunctionType::get(
+            llvm::IntegerType::getInt32Ty(ctx.context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            true
+        );
+        printfFunc = llvm::Function::Create(
+            printfType, llvm::Function::ExternalLinkage, "printf", ctx.module);
+    }
+
+    if (idents.empty()) return nullptr;
+
+    // 第一个参数必须是格式字符串
+    std::vector<llvm::Value*> printfArgs;
+
+    // 评估第一个参数（格式串）
+    llvm::Value* fmtVal = idents[0]->codeGen(ctx);
+    if (!fmtVal) return nullptr;
+
+    // 如果是 __l25_string 结构体，提取 data 指针
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    if (fmtVal->getType() == strTy) {
+        fmtVal = ctx.builder.CreateExtractValue(fmtVal, 1, "fmt_data");
+    }
+    printfArgs.push_back(fmtVal);
+
+    // 后续参数：直接传递，根据类型做必要的类型提升
+    for (size_t i = 1; i < idents.size(); i++) {
+        llvm::Value* val = idents[i]->codeGen(ctx);
+        if (!val) continue;
+
+        if (val->getType()->isIntegerTy(1)) {
+            val = ctx.builder.CreateZExt(val, llvm::Type::getInt32Ty(ctx.context));
+        }
+
+        // L25 字符串 → 提取 data 指针
+        if (val->getType() == strTy) {
+            val = ctx.builder.CreateExtractValue(val, 1, "arg_str_data");
+        }
+        // float → double（C 的可变参数规则: float 提升为 double）
+        if (val->getType()->isFloatTy()) {
+            val = ctx.builder.CreateFPExt(val, llvm::Type::getDoubleTy(ctx.context), "fpext_printf");
+        }
+
+        printfArgs.push_back(val);
+    }
+
+    ctx.builder.CreateCall(printfFunc, printfArgs);
+    return nullptr;
+}
+
+// ===== scanf 语句（C 风格格式化输入） =====
+ScanfStmt::ScanfStmt(std::unique_ptr<ArgList> args)
+    : idents(std::move(args->args)) {}
+
+void ScanfStmt::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Scanf" << std::endl;
+    for (const auto& ident: idents) {
+        ident->print(indent + 2);
+    }
+}
+
+llvm::Value* ScanfStmt::codeGen(CodeGenContext& ctx) const {
+    // 获取或声明 scanf 函数
+    llvm::Function* scanfFunc = ctx.module.getFunction("scanf");
+    if (!scanfFunc) {
+        llvm::FunctionType* scanfType = llvm::FunctionType::get(
+            llvm::IntegerType::getInt32Ty(ctx.context),
+            llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0),
+            true
+        );
+        scanfFunc = llvm::Function::Create(
+            scanfType, llvm::Function::ExternalLinkage, "scanf", ctx.module);
+    }
+
+    if (idents.empty()) return nullptr;
+
+    // 第一个参数是格式字符串
+    std::vector<llvm::Value*> scanfArgs;
+
+    llvm::Value* fmtVal = idents[0]->codeGen(ctx);
+    if (!fmtVal) return nullptr;
+
+    // 如果是 __l25_string 结构体，提取 data 指针
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    if (fmtVal->getType() == strTy) {
+        fmtVal = ctx.builder.CreateExtractValue(fmtVal, 1, "scanf_fmt_data");
+    }
+    scanfArgs.push_back(fmtVal);
+
+    // 后续参数：必须是可取地址的（变量标识符或数组下标）
+    for (size_t i = 1; i < idents.size(); i++) {
+        llvm::Value* addr = nullptr;
+
+        if (auto* idExpr = dynamic_cast<IdentExpr*>(idents[i].get())) {
+            SymbolInfo* symbol = scope->lookup(idExpr->ident);
+            if (!symbol) {
+                reportError("变量: " + idExpr->ident + " 未声明");
+                return nullptr;
+            }
+            addr = symbol->addr;
+        } else if (auto* arraySubscriptExpr = dynamic_cast<ArraySubscriptExpr*>(idents[i].get())) {
+            addr = arraySubscriptExpr->getAddress(ctx);
+        } else {
+            // 不是变量或数组下标，无法取地址
+            reportError("scanf 参数必须是变量或数组元素");
+            return nullptr;
+        }
+
+        if (!addr) {
+            reportError("scanf 参数无法获取地址");
+            return nullptr;
+        }
+        scanfArgs.push_back(addr);
+    }
+
+    ctx.builder.CreateCall(scanfFunc, scanfArgs);
+    return nullptr;
+}
+
 // ===== delete 语句 =====
 DeleteStmt::DeleteStmt(std::unique_ptr<Expr> target)
     : target(std::move(target)) {}

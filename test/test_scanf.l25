@@ -1,0 +1,9 @@
+// 测试 scanf —— 用 echo 管道输入测试
+program scanf_test {
+    main {
+        let x: int = 0;
+        let y: int = 0;
+        scanf("%d %d", x, y);
+        printf("x=%d, y=%d, sum=%d\n", x, y, x + y);
+    }
+}

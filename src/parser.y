@@ -97,6 +97,8 @@ extern Program* rootProgram;
 %type <stmt> for_stmt
 %type <stmt> input_stmt
 %type <stmt> output_stmt
+%type <stmt> printf_stmt
+%type <stmt> scanf_stmt
 %type <funcCallStmt> func_call // 特殊处理
 %type <nestedFuncStmt> nested_func_stmt
 
@@ -124,6 +126,7 @@ extern Program* rootProgram;
 %token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN
+%token PRINTF SCANF
 %token ARROW
 %token PLUS MINUS STAR DIVIDE EQ NEQ LT LE GT GE ASSIGN ANDSIGN MOD DOT TILDE
 %token AND OR NOT
@@ -426,7 +429,7 @@ input_arg_list:
     ;
 
 stmt:
-    declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | input_stmt | output_stmt
+    declare_stmt | assign_stmt | if_stmt | while_stmt | for_stmt | input_stmt | output_stmt | printf_stmt | scanf_stmt
     | BREAK
     {
         $$ = new BreakStmt();
@@ -680,6 +683,24 @@ output_stmt:
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     } 
+    ;
+
+printf_stmt:
+    PRINTF LPAREN arg_list RPAREN
+    {
+        $$ = new PrintfStmt{ std::unique_ptr<ArgList>($3) };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    ;
+
+scanf_stmt:
+    SCANF LPAREN arg_list RPAREN
+    {
+        $$ = new ScanfStmt{ std::unique_ptr<ArgList>($3) };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     ;
 
 bool_expr:
