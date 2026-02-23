@@ -75,6 +75,10 @@ void    l25_thread_pool_init(void);
 void    l25_thread_spawn(void (*fn)(void*), void* arg);
 void    l25_thread_pool_shutdown(void);
 
+/* ===== Clock API ===== */
+
+float   l25_clock_ms(void);  /* CLOCK_MONOTONIC 毫秒数 */
+
 #ifdef __cplusplus
 }
 #endif

@@ -1005,6 +1005,14 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_gc_resume",
             llvm::FunctionType::get(voidTy, {}, false));
     }
+
+    // ===== Clock API =====
+    auto* floatTy = llvm::Type::getFloatTy(ctx.context);
+    // l25_clock_ms() → float
+    if (!ctx.module.getFunction("l25_clock_ms")) {
+        ctx.module.getOrInsertFunction("l25_clock_ms",
+            llvm::FunctionType::get(floatTy, {}, false));
+    }
 }
 
 // ===== 根栈 push（通过函数调用，线程安全） =====

@@ -62,6 +62,10 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     TypeInfo intType(SymbolKind::Int, {});
     TypeInfo int64Type(SymbolKind::Int, {}); // int 即 i32，但 GC 返回 i64 → codegen 做 trunc
 
+    // 计时函数
+    TypeInfo floatType(SymbolKind::Float, {});
+    registerBuiltin("clock_ms", "l25_clock_ms", {}, floatType);
+
     // GC 监测函数
     registerBuiltin("gc_stats",     "l25_gc_stats",     {}, voidType);
     registerBuiltin("gc_count",     "l25_gc_count",     {}, intType);
