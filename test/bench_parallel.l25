@@ -10,6 +10,7 @@
 // ==============================================
 
 program BenchParallel {
+    import std;
 
     // ---- 朴素质数判断 (含 break 优化) ----
     func is_prime(n: int) -> int {
@@ -59,9 +60,9 @@ program BenchParallel {
         output("========================================");
 
         // --- 串行 ---
-        let t0: float = clock_ms();
+        let t0: float = std.clock_ms();
         let serial_result: int = count_primes_range(2, N + 1);
-        let t1: float = clock_ms();
+        let t1: float = std.clock_ms();
         let serial_ms: float = t1 - t0;
         printf("  Serial   result = %d\n", serial_result);
         printf("  Serial   time   = %.1f ms\n", serial_ms);
@@ -71,7 +72,7 @@ program BenchParallel {
         let total_range: int = N - 1;
         let chunk_size: int = total_range / NCHUNKS;
 
-        let t2: float = clock_ms();
+        let t2: float = std.clock_ms();
 
         // chunk 0..7
         let c0lo: int = 2 + 0 * chunk_size;
@@ -290,7 +291,7 @@ program BenchParallel {
             received = received + 1;
         };
 
-        let t3: float = clock_ms();
+        let t3: float = std.clock_ms();
         let parallel_ms: float = t3 - t2;
         printf("  Parallel result = %d\n", parallel_result);
         printf("  Parallel time   = %.1f ms\n", parallel_ms);

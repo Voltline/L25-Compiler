@@ -150,12 +150,14 @@ struct EnumDecl: public ASTNode
 struct Program: public ASTNode
 {
     std::unique_ptr<IdentExpr> name;
+    std::vector<std::string> imports;
     std::vector<std::unique_ptr<ClassDecl>> classes;
     std::vector<std::unique_ptr<EnumDecl>> enums;
     std::vector<std::unique_ptr<Func>> functions;
     std::unique_ptr<StmtList> main_body;
 
     Program(std::unique_ptr<IdentExpr> name,
+            std::vector<std::string> imports,
             std::vector<std::unique_ptr<ClassDecl>> classes,
             std::vector<std::unique_ptr<EnumDecl>> enums,
             std::vector<std::unique_ptr<Func>> functions,

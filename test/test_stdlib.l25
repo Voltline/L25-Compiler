@@ -1,16 +1,17 @@
 program TestStdlib {
+    import std;
     main {
         // 测试 srand 和 rand
-        srand(42);
-        let r1 = rand();
-        let r2 = rand();
+        std.srand(42);
+        let r1 = std.rand();
+        let r2 = std.rand();
         output(r1);
         output(r2);
 
         // 测试 sleep_ms（短暂休眠）
-        let t1 = clock_ms();
-        sleep_ms(50);
-        let t2 = clock_ms();
+        let t1 = std.clock_ms();
+        std.sleep_ms(50);
+        let t2 = std.clock_ms();
         // t2 - t1 应该 >= 50ms
         let elapsed: float = t2 - t1;
         // 输出是否至少休眠了 40ms（给一些容差）
@@ -21,11 +22,11 @@ program TestStdlib {
         };
 
         // 测试 rand 返回非负数
-        srand(123);
+        std.srand(123);
         let ok = 1;
         let i = 0;
         while (i < 100) {
-            if (rand() < 0) {
+            if (std.rand() < 0) {
                 ok = 0;
             };
             i = i + 1;

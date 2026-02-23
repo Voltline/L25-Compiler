@@ -845,6 +845,50 @@ void MethodCallExpr::print(int indent) const
 
 llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
 {
+    // 命名空间限定的函数调用（如 std.rand()）
+    if (auto* identTarget = dynamic_cast<IdentExpr*>(target.get())) {
+        std::string qualifiedName = identTarget->ident + "." + method->ident;
+        SymbolInfo* funcSymbol = scope->lookup(qualifiedName);
+        if (funcSymbol && funcSymbol->kind == SymbolKind::Function) {
+            llvm::Function* calleeFunc = ctx.module.getFunction(funcSymbol->llvmName);
+            if (funcSymbol->isBuiltin && !calleeFunc) {
+                ensureGCRuntimeDeclared(ctx);
+                calleeFunc = ctx.module.getFunction(funcSymbol->llvmName);
+            }
+            if (!calleeFunc) {
+                reportError("函数: " + qualifiedName + " LLVM 声明未找到");
+                return nullptr;
+            }
+
+            std::vector<llvm::Value*> argsV;
+            if (args) {
+                int idx = 0;
+                for (const auto& argExpr : args->args) {
+                    llvm::Value* argVal = argExpr->codeGen(ctx);
+                    if (!argVal) return nullptr;
+                    if (funcSymbol->isBuiltin) {
+                        auto* fnTy = calleeFunc->getFunctionType();
+                        if (idx < static_cast<int>(fnTy->getNumParams())) {
+                            argVal = castValueToType(argVal, fnTy->getParamType(idx), ctx);
+                        }
+                    }
+                    argsV.push_back(argVal);
+                    idx++;
+                }
+            }
+
+            if (calleeFunc->getReturnType()->isVoidTy()) {
+                ctx.builder.CreateCall(calleeFunc, argsV);
+                return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context), 0);
+            }
+            llvm::Value* result = ctx.builder.CreateCall(calleeFunc, argsV, qualifiedName + "_call");
+            if (funcSymbol->isBuiltin && result->getType()->isIntegerTy(64)) {
+                result = ctx.builder.CreateTrunc(result, llvm::Type::getInt32Ty(ctx.context), qualifiedName + "_trunc");
+            }
+            return result;
+        }
+    }
+
     TypeInfo baseType = evaluateExprType(target.get());
 
     // ===== 容器方法调用分发 =====

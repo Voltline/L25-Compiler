@@ -66,6 +66,7 @@ extern Program* rootProgram;
     EnumDecl* enumDecl;
     std::vector<std::unique_ptr<EnumDecl>>* enumList;
     std::vector<std::string>* enumValues;
+    std::vector<std::string>* importList;
     BoolExpr* boolExpr;
     ArgList* argList; // 函数调用与output共用
     FuncCallStmt* funcCallStmt;
@@ -93,6 +94,7 @@ extern Program* rootProgram;
 %type <enumDecl> enum_def
 %type <enumList> enum_def_list opt_enum_def_list
 %type <enumValues> enum_value_list
+%type <importList> import_list opt_import_list
 %type <paramList> param_list
 %type <argList> arg_list
 %type <inputArgList> input_arg_list
@@ -133,7 +135,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM IMPORT
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN IN
 %token PRINTF SCANF
@@ -154,23 +156,51 @@ extern Program* rootProgram;
 
 %%
 input:
-    PROGRAM IDENT LBRACE opt_enum_def_list opt_class_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    PROGRAM IDENT LBRACE opt_import_list opt_enum_def_list opt_class_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
-        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$5), std::move(*$4), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($8));
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::move(*$6), std::move(*$5), std::vector<std::unique_ptr<Func>>(), std::unique_ptr<StmtList>($9));
         rootProgram = $$;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $4;
         delete $5;
+        delete $6;
     }
-    | PROGRAM IDENT LBRACE opt_enum_def_list opt_class_def_list func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
+    | PROGRAM IDENT LBRACE opt_import_list opt_enum_def_list opt_class_def_list func_def_list MAIN LBRACE stmt_list RBRACE RBRACE
     {
-        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$5), std::move(*$4), std::move(*$6), std::unique_ptr<StmtList>($9));
+        $$ = new Program(std::unique_ptr<IdentExpr>(new IdentExpr(*$2)), std::move(*$4), std::move(*$6), std::move(*$5), std::move(*$7), std::unique_ptr<StmtList>($10));
         rootProgram = $$;
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
         delete $4;
         delete $5;
+        delete $6;
+    }
+    ;
+
+opt_import_list
+    :
+    {
+        $$ = new std::vector<std::string>();
+    }
+    | import_list
+    {
+        $$ = $1;
+    }
+    ;
+
+import_list
+    : IMPORT IDENT SEMICOLON
+    {
+        $$ = new std::vector<std::string>();
+        $$->push_back(*$2);
+        delete $2;
+    }
+    | import_list IMPORT IDENT SEMICOLON
+    {
+        $$ = $1;
+        $$->push_back(*$3);
+        delete $3;
     }
     ;
 

@@ -61,16 +61,26 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
     TypeInfo voidType(SymbolKind::Invalid, {});
     TypeInfo intType(SymbolKind::Int, {});
     TypeInfo int64Type(SymbolKind::Int, {}); // int 即 i32，但 GC 返回 i64 → codegen 做 trunc
-
-    // 计时函数
     TypeInfo floatType(SymbolKind::Float, {});
-    registerBuiltin("clock_ms", "l25_clock_ms", {}, floatType);
 
-    // 系统调用函数
-    registerBuiltin("sleep_ms", "l25_sleep_ms", {intType}, voidType);
-    registerBuiltin("exit",     "l25_exit",     {intType}, voidType);
-    registerBuiltin("rand",     "l25_rand",     {},        intType);
-    registerBuiltin("srand",    "l25_srand",    {intType}, voidType);
+    // ===== import std: 标准库函数 =====
+    bool hasImportStd = false;
+    for (const auto& imp : program.imports) {
+        if (imp == "std") {
+            hasImportStd = true;
+        } else {
+            // 目前仅支持 std
+            // 可在此扩展其他模块
+        }
+    }
+
+    if (hasImportStd) {
+        registerBuiltin("std.clock_ms", "l25_clock_ms", {}, floatType);
+        registerBuiltin("std.sleep_ms", "l25_sleep_ms", {intType}, voidType);
+        registerBuiltin("std.exit",     "l25_exit",     {intType}, voidType);
+        registerBuiltin("std.rand",     "l25_rand",     {},        intType);
+        registerBuiltin("std.srand",    "l25_srand",    {intType}, voidType);
+    }
 
     // GC 监测函数
     registerBuiltin("gc_stats",     "l25_gc_stats",     {}, voidType);
@@ -699,6 +709,18 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
             reportError(*member, "类中不存在成员：" + member->member->ident);
         }
     } else if (auto methodCall = dynamic_cast<const MethodCallExpr*>(&expr)) {
+        // 检查是否为命名空间限定的函数调用（如 std.rand()）
+        if (auto* identTarget = dynamic_cast<IdentExpr*>(methodCall->target.get())) {
+            std::string qualifiedName = identTarget->ident + "." + methodCall->method->ident;
+            SymbolInfo* funcSym = currentScope->lookup(qualifiedName);
+            if (funcSym && funcSym->kind == SymbolKind::Function) {
+                // 标记为命名空间调用，在 codegen 中处理
+                if (methodCall->args) {
+                    for (const auto& arg : methodCall->args->args) { analyzeExpr(*arg); }
+                }
+                return;
+            }
+        }
         analyzeExpr(*methodCall->target);
         TypeInfo targetType = evaluateExprType(methodCall->target.get());
         std::string className = targetType.className;

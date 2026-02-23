@@ -41,11 +41,13 @@ llvm::Value* EnumDecl::codeGen(CodeGenContext& ctx) const
 
 // ===== 程序节点 =====
 Program::Program(std::unique_ptr<IdentExpr> name,
+                 std::vector<std::string> imports,
                  std::vector<std::unique_ptr<ClassDecl>> classes,
                  std::vector<std::unique_ptr<EnumDecl>> enums,
                  std::vector<std::unique_ptr<Func>> functions,
                  std::unique_ptr<StmtList> main_body)
     : name(std::move(name))
+    , imports(std::move(imports))
     , classes(std::move(classes))
     , enums(std::move(enums))
     , functions(std::move(functions))

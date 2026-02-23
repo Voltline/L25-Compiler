@@ -40,6 +40,7 @@ ident {letter}({letter}|[0-9])*
 "for"       { updateLocationAndColumn(); return FOR; }
 "break"     { updateLocationAndColumn(); return BREAK; }
 "enum"      { updateLocationAndColumn(); return ENUM; }
+"import"    { updateLocationAndColumn(); return IMPORT; }
 "input"     { updateLocationAndColumn(); return INPUT; }
 "output"    { updateLocationAndColumn(); return OUTPUT; }
 "return"    { updateLocationAndColumn(); return RETURN; }
