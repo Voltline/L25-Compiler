@@ -1,0 +1,42 @@
+program test_bool {
+    main {
+        // true/false 作为表达式值
+        let a: int = true;
+        let b: int = false;
+        output(a);
+        output(b);
+
+        // true/false 在算术中使用
+        output(true + true);
+        output(true + false);
+
+        // true/false 在条件中使用
+        if (true) {
+            output(1);
+        };
+        if (false) {
+            output(999);
+        } else {
+            output(0);
+        };
+
+        // while(true) + break
+        let count: int = 0;
+        while (true) {
+            count = count + 1;
+            if (count == 3) {
+                break;
+            };
+        };
+        output(count);
+
+        // 赋值和比较
+        let flag: int = true;
+        if (flag == true) {
+            output(10);
+        };
+        if (flag != false) {
+            output(20);
+        };
+    }
+}

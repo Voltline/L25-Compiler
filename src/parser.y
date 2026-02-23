@@ -2,6 +2,7 @@
 %define parse.error verbose
 %define lr.type ielr
 %glr-parser
+%expect-rr 2
 %code requires {
 #include "ast.h"
 struct ClassMemberAggregate;
@@ -127,7 +128,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN IN
 %token PRINTF SCANF
@@ -815,6 +816,22 @@ bool_expr:
     {
         $$ = $2;
     }
+    | TRUE_KW
+    {
+        $$ = new BoolExpr{
+            "!=", std::make_unique<NumberExpr>(1), std::make_unique<NumberExpr>(0)
+        };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | FALSE_KW
+    {
+        $$ = new BoolExpr{
+            "!=", std::make_unique<NumberExpr>(0), std::make_unique<NumberExpr>(0)
+        };
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
     ;
 
 expr:
@@ -903,6 +920,18 @@ factor:
     | NIL
     {
         $$ = new NilExpr();
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | TRUE_KW
+    {
+        $$ = new NumberExpr(1);
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | FALSE_KW
+    {
+        $$ = new NumberExpr(0);
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }
