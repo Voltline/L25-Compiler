@@ -16,6 +16,7 @@ program BenchParallel {
     func is_prime(n: int) -> int {
         let result: int = 1;
         if (n < 2) {
+            
             result = 0;
         } else {
             if (n < 4) {

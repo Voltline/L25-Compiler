@@ -459,6 +459,76 @@ program demo {
 }
 ```
 
+* ↩️ *Early return from functions*:
+```L25
+program early_return {
+    func abs(x) {
+        if (x < 0) {
+            return -x;
+        };
+        return x;
+    }
+
+    func find(arr: [10], target) {
+        for (let i = 0; i < 10; i = i + 1) {
+            if (arr[i] == target) {
+                return i;
+            };
+        };
+        return -1;
+    }
+
+    main {
+        output(abs(-42));  // 42
+        output(abs(7));    // 7
+    }
+}
+```
+&emsp; `return <expr>;` can appear anywhere inside a function or method body, including inside `if`/`while`/`for` blocks. RAII cleanup is performed before the return. A bare `return;` (without a value) is also accepted, defaulting to 0.
+
+* 🔢 *Enum types*:
+```L25
+program enum_demo {
+    enum Color {
+        Red,
+        Green,
+        Blue
+    }
+
+    main {
+        let c = Color.Green;
+        output(c);             // 1
+        if (c == Color.Red) {
+            output(0);
+        };
+        if (c == Color.Green) {
+            output(1);         // 1
+        };
+    }
+}
+```
+&emsp; Enum values are integer constants starting from 0. Each value is registered globally at compile time and can be used in expressions, comparisons, and assignments.
+
+* � *Module import and standard library namespace*:
+```L25
+program stdlib_demo {
+    import std;
+
+    main {
+        std.srand(42);
+        let r = std.rand();
+        output(r);
+
+        let t1 = std.clock_ms();
+        std.sleep_ms(100);
+        let t2 = std.clock_ms();
+        let elapsed: float = t2 - t1;
+        printf("Elapsed: %.1f ms\n", elapsed);
+    }
+}
+```
+&emsp; `import std;` enables the standard library functions under the `std` namespace. Available functions: `std.clock_ms()` (returns `float` milliseconds), `std.sleep_ms(ms)`, `std.exit(code)`, `std.rand()` (returns `int`), and `std.srand(seed)`. This prevents naming conflicts between user-defined functions and built-in ones. Without `import std;`, calling `std.xxx()` will produce a semantic error.
+
 ### 🧪 Examples
 * 🌀 Fibonacci Calculate:
 ```L25
@@ -605,10 +675,21 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
 ```
 <program> =
     "program" <ident> "{"
+        { <import_decl> }
+        { <enum_def> }
         { <class_def> }
         { <func_def> }
         "main" "{" <stmt_list> "}"
     "}"
+
+<import_decl> =
+    "import" <ident> ";"
+
+<enum_def> =
+    "enum" <ident> "{" <enum_value_list> "}"
+
+<enum_value_list> =
+    <ident> { "," <ident> }
 
 <class_def> =
     "class" <ident> [ "extends" <ident> ] "{"
@@ -671,6 +752,7 @@ The extension is also open-sourced on GitHub – feel free to check it out and g
     | <printf_stmt>
     | <scanf_stmt>
     | "break"
+    | "return" [ <expr> ]
 
 <printf_stmt> =
     "printf" "(" <arg_list> ")"
@@ -850,6 +932,10 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - `spawn` blocks capture variables by value; GC-managed objects should not be created inside `spawn` blocks.
 - The thread pool and all spawned tasks are shut down before RAII cleanup to prevent use-after-free.
 - `break` can only be used inside `while` or `for` loops.
+- `return` can appear anywhere inside a function/method body; bare `return;` defaults to returning 0.
+- Enum values are global constants; duplicate names across enums or with existing symbols will cause a redefinition error.
+- Only `import std` is currently supported; other module names are accepted syntactically but have no effect.
+- Standard library functions (`clock_ms`, `sleep_ms`, `exit`, `rand`, `srand`) require `import std;` and must be called as `std.xxx()`.
 
 
 ## 🛠️ Build Instructions
@@ -923,12 +1009,14 @@ L25-Compiler/
 │   └── logo.png
 ├── runtime
 │   ├── l25_channel.c
+│   ├── l25_clock.c
 │   ├── l25_deque.c
 │   ├── l25_gc.c
 │   ├── l25_gc.h
 │   ├── l25_map.c
 │   ├── l25_queue.c
 │   ├── l25_runtime.h
+│   ├── l25_stdlib.c
 │   ├── l25_thread.c
 │   └── l25_vector.c
 ├── src
@@ -948,17 +1036,28 @@ L25-Compiler/
 │   ├── semanticAnalysis.cpp
 │   └── symbol.cpp
 ├── test
+│   ├── bench_parallel.l25
 │   ├── error_class_unknown_member.l25
 │   ├── error_missing_semicolon.l25
 │   ├── error_undeclared_variable.l25
 │   ├── error_wrong_call_arity.l25
 │   ├── test1.l25 .. test20.l25
+│   ├── test_bool.l25
+│   ├── test_break.l25
+│   ├── test_channel_capacity.l25
+│   ├── test_channel_close.l25
+│   ├── test_channel_closed.l25
+│   ├── test_channel_range.l25
+│   ├── test_channel_unbuffered.l25
 │   ├── test_class_basic.l25
 │   ├── test_class_method_call.l25
 │   ├── test_closure.l25
+│   ├── test_complex_concurrent.l25
+│   ├── test_cpu_occupy.l25
 │   ├── test_delete_gc.l25
 │   ├── test_delete_safety.l25
 │   ├── test_deque.l25
+│   ├── test_enum.l25
 │   ├── test_float.l25
 │   ├── test_for.l25
 │   ├── test_gc.l25
@@ -976,16 +1075,14 @@ L25-Compiler/
 │   ├── test_raii_linked_list.l25
 │   ├── test_raii_string.l25
 │   ├── test_reflection.l25
+│   ├── test_return.l25
 │   ├── test_runtime_reflect.l25
 │   ├── test_scanf.l25
-│   ├── test_string.l25
-│   ├── test_break.l25
-│   ├── test_channel_capacity.l25
-│   ├── test_complex_concurrent.l25
-│   ├── test_cpu_occupy.l25
 │   ├── test_spawn.l25
 │   ├── test_spawn_fib.l25
 │   ├── test_spawn_multi.l25
+│   ├── test_stdlib.l25
+│   ├── test_string.l25
 │   ├── test_vector.l25
 │   └── test_vector_class.l25
 ├── test.sh
