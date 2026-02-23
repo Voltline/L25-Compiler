@@ -50,3 +50,60 @@ llvm::Value* StrlenExpr::codeGen(CodeGenContext& ctx) const
     // 直接提取 len 字段（index 0）
     return ctx.builder.CreateExtractValue(val, 0, "str_len");
 }
+
+// ===== readln 内建函数节点 =====
+
+void ReadlnExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Readln" << std::endl;
+}
+
+llvm::Value* ReadlnExpr::codeGen(CodeGenContext& ctx) const
+{
+    ensureStringRuntimeDeclared(ctx);
+
+    auto* i32Ty    = llvm::Type::getInt32Ty(ctx.context);
+
+    llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "readln.outlen");
+    llvm::Function* fn = ctx.module.getFunction("l25_readln");
+    llvm::Value* data = ctx.builder.CreateCall(fn, { outLen }, "readln.data");
+    llvm::Value* len  = ctx.builder.CreateLoad(i32Ty, outLen, "readln.len");
+
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    llvm::Value* result = llvm::UndefValue::get(strTy);
+    result = ctx.builder.CreateInsertValue(result, len, 0, "str.set.len");
+    result = ctx.builder.CreateInsertValue(result, data, 1, "str.set.data");
+    return result;
+}
+
+// ===== itos 内建函数节点 =====
+
+ItosExpr::ItosExpr(std::unique_ptr<Expr> value) : value(std::move(value)) {}
+
+void ItosExpr::print(int indent) const
+{
+    std::cout << std::string(indent, ' ') << "Itos" << std::endl;
+    if (value) value->print(indent + 2);
+}
+
+llvm::Value* ItosExpr::codeGen(CodeGenContext& ctx) const
+{
+    ensureStringRuntimeDeclared(ctx);
+
+    llvm::Value* val = value->codeGen(ctx);
+    if (!val) { reportError("itos 参数表达式生成失败"); return nullptr; }
+
+    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+    llvm::Value* intVal = castValueToType(val, i32Ty, ctx);
+
+    llvm::AllocaInst* outLen = ctx.builder.CreateAlloca(i32Ty, nullptr, "itos.outlen");
+    llvm::Function* fn = ctx.module.getFunction("l25_itos");
+    llvm::Value* data = ctx.builder.CreateCall(fn, { intVal, outLen }, "itos.data");
+    llvm::Value* len  = ctx.builder.CreateLoad(i32Ty, outLen, "itos.len");
+
+    llvm::StructType* strTy = getL25StringType(ctx.context);
+    llvm::Value* result = llvm::UndefValue::get(strTy);
+    result = ctx.builder.CreateInsertValue(result, len, 0, "str.set.len");
+    result = ctx.builder.CreateInsertValue(result, data, 1, "str.set.data");
+    return result;
+}

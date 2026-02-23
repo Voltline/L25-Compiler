@@ -1,0 +1,8 @@
+program test_itos_basic {
+    main {
+        let s = itos(42);
+        printf("Result: %s\n", s);
+        let s2 = "Hello #" + itos(3) + " world";
+        printf("%s\n", s2);
+    }
+}

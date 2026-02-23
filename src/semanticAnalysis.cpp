@@ -984,6 +984,10 @@ void SemanticAnalyzer::analyzeExpr(Expr& expr)
         // 字符串字面量，无需额外分析
     } else if (auto strlenExpr = dynamic_cast<const StrlenExpr*>(&expr)) {
         analyzeExpr(*strlenExpr->target);
+    } else if (dynamic_cast<const ReadlnExpr*>(&expr)) {
+        // readln() 无参数，无需额外分析
+    } else if (auto itosExpr = dynamic_cast<const ItosExpr*>(&expr)) {
+        analyzeExpr(*itosExpr->value);
     } else if (auto tnExpr = dynamic_cast<const TypenameExpr*>(&expr)) {
         analyzeExpr(*tnExpr->target);
     } else if (auto fcExpr = dynamic_cast<const FieldCountExpr*>(&expr)) {

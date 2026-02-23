@@ -1,0 +1,19 @@
+program tcp_client {
+    import net;
+
+    main {
+        let fd = net.tcp_connect("127.0.0.1", 8080);
+        if (fd >= 0) {
+            printf("Connected to server\n");
+
+            net.tcp_send(fd, "Hello from L25 client!");
+            let reply = net.tcp_recv(fd, 1024);
+            printf("Server replied: %s\n", reply);
+
+            net.close(fd);
+            printf("Connection closed\n");
+        } else {
+            printf("Failed to connect\n");
+        };
+    }
+}

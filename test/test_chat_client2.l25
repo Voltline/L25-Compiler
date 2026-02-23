@@ -1,0 +1,29 @@
+// Auto-test client: sends scripted messages for automated testing
+program chat_auto_client {
+    import net;
+    import std;
+
+    main {
+        let fd = net.tcp_connect("127.0.0.1", 9000);
+        if (fd < 0) {
+            printf("Failed to connect\n");
+            std.exit(1);
+        };
+
+        // receive welcome
+        let welcome = net.tcp_recv(fd, 4096);
+        printf("%s\n", welcome);
+
+        // send a test message
+        std.sleep_ms(300);
+        net.tcp_send(fd, "Hello from auto client!");
+
+        // receive broadcast of own message
+        let echo = net.tcp_recv(fd, 4096);
+        printf("%s\n", echo);
+
+        std.sleep_ms(300);
+        net.close(fd);
+        printf("Auto client done\n");
+    }
+}

@@ -96,6 +96,16 @@ void ensureStringRuntimeDeclared(CodeGenContext& ctx) {
         ctx.module.getOrInsertFunction("l25_string_contains",
             llvm::FunctionType::get(i32Ty, { i8PtrTy, i32Ty, i8PtrTy, i32Ty }, false));
     }
+    // l25_readln(out_len: i32*) -> i8*
+    if (!ctx.module.getFunction("l25_readln")) {
+        ctx.module.getOrInsertFunction("l25_readln",
+            llvm::FunctionType::get(i8PtrTy, { i32PtrTy }, false));
+    }
+    // l25_itos(val: i32, out_len: i32*) -> i8*
+    if (!ctx.module.getFunction("l25_itos")) {
+        ctx.module.getOrInsertFunction("l25_itos",
+            llvm::FunctionType::get(i8PtrTy, { i32Ty, i32PtrTy }, false));
+    }
 }
 
 // ===== 内部工具函数 =====
@@ -294,6 +304,12 @@ TypeInfo evaluateExprType(const Expr* expr)
     }
     if (dynamic_cast<const StrlenExpr*>(expr)) {
         return TypeInfo{ SymbolKind::Int, {}, 0, false };
+    }
+    if (dynamic_cast<const ReadlnExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::String, {}, 0, false };
+    }
+    if (dynamic_cast<const ItosExpr*>(expr)) {
+        return TypeInfo{ SymbolKind::String, {}, 0, false };
     }
     if (dynamic_cast<const TypenameExpr*>(expr)) {
         return TypeInfo{ SymbolKind::String, {}, 0, false };

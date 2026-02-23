@@ -99,6 +99,8 @@ char*   l25_string_to_upper(const char* data, int32_t data_len, int32_t* out_len
 char*   l25_string_to_lower(const char* data, int32_t data_len, int32_t* out_len);
 char*   l25_string_replace(const char* data, int32_t data_len, const char* old_s, int32_t old_len, const char* new_s, int32_t new_len, int32_t* out_len);
 int32_t l25_string_contains(const char* haystack, int32_t h_len, const char* needle, int32_t n_len);
+char*   l25_readln(int32_t* out_len);
+char*   l25_itos(int32_t val, int32_t* out_len);
 
 /* ===== Clock API ===== */
 

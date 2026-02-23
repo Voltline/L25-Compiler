@@ -159,7 +159,7 @@ program string_demo {
     }
 }
 ```
-&emsp; Strings are represented as `{ i32 len, i8* data }` structs.  Type can be inferred from a string literal or declared explicitly with `string`. Supported operations: concatenation (`+`), comparison (`==`, `!=`), `output`, `input`, and `strlen`.
+&emsp; Strings are represented as `{ i32 len, i8* data }` structs.  Type can be inferred from a string literal or declared explicitly with `string`. Supported operations: concatenation (`+`), comparison (`==`, `!=`), `output`, `input`, and `strlen`. Additional built-in functions: `readln()` reads a full line from stdin (returns a string), and `itos(n)` converts an integer to its string representation. String values are deep-copied when sent through `channel<string>`, ensuring safe concurrent use.
 
 * 🔍 *Compile-time Reflection for Classes*:
 ```L25

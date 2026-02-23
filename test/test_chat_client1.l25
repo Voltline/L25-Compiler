@@ -1,0 +1,47 @@
+program chat_client {
+    import net;
+    import std;
+
+    main {
+        let fd = net.tcp_connect("127.0.0.1", 9000);
+        if (fd < 0) {
+            printf("Failed to connect to server\n");
+            std.exit(1);
+        };
+        printf("Connected to chat server! Type messages and press Enter.\n");
+        printf("Type 'quit' to exit.\n\n");
+
+        // Spawn receiver thread
+        spawn {
+            let alive = 1;
+            while (alive == 1) {
+                let msg = net.tcp_recv(fd, 4096);
+                if (strlen(msg) == 0) {
+                    printf("\n[Disconnected from server]\n");
+                    alive = 0;
+                } else {
+                    printf("\r%s\n> ", msg);
+                };
+            };
+        };
+
+        // Main thread: read user input and send
+        let running = 1;
+        while (running == 1) {
+            printf("> ");
+            let line = readln();
+            if (strlen(line) == 0) {
+                // empty line, skip
+            } else {
+                if (line == "quit") {
+                    running = 0;
+                } else {
+                    net.tcp_send(fd, line);
+                };
+            };
+        };
+
+        net.close(fd);
+        printf("Bye!\n");
+    }
+}

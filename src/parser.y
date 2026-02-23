@@ -142,7 +142,7 @@ extern Program* rootProgram;
 %token <strval> STRING_LITERAL
 %token <ident> IDENT
 
-%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM IMPORT SELECT CASE DEFAULT
+%token PROGRAM FUNC MAIN LET IF ELSE WHILE FOR INPUT OUTPUT RETURN NIL INTSIGN FLOATSIGN STRINGSIGN STRLEN READLN ITOS CLASS EXTENDS THIS NEW DELETE BREAK TRUE_KW FALSE_KW ENUM IMPORT SELECT CASE DEFAULT
 %token TYPENAME_KW FIELDCOUNT METHODCOUNT FIELDNAME METHODNAME INVOKE
 %token VECTOR MAP DEQUE QUEUE CHANNEL SPAWN IN
 %token PRINTF SCANF
@@ -1188,6 +1188,18 @@ factor:
     | STRLEN LPAREN expr RPAREN
     {
         $$ = new StrlenExpr(std::unique_ptr<Expr>($3));
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | READLN LPAREN RPAREN
+    {
+        $$ = new ReadlnExpr();
+        $$->lineno = @1.first_line;
+        $$->column = @1.first_column;
+    }
+    | ITOS LPAREN expr RPAREN
+    {
+        $$ = new ItosExpr(std::unique_ptr<Expr>($3));
         $$->lineno = @1.first_line;
         $$->column = @1.first_column;
     }

@@ -1,0 +1,94 @@
+program chat_server {
+    import net;
+    import std;
+
+    main {
+        let server_fd = net.tcp_listen(9000);
+        if (server_fd < 0) {
+            printf("Failed to start server\n");
+            std.exit(1);
+        };
+        printf("=== Chat Server started on port 9000 ===\n");
+
+        let count = 0;
+        // Each client's fd is sent here; broadcaster maintains its own list
+        let join_ch: channel<int, 64>;
+        // All messages (already formatted) are sent here for broadcasting
+        let msg_ch: channel<string, 256>;
+
+        // Broadcaster thread: receive new fds via join_ch, broadcast via msg_ch
+        // Store up to 64 fds in flat variables (avoid array-in-spawn issue)
+        spawn {
+            let fd0 = -1; let fd1 = -1; let fd2 = -1; let fd3 = -1;
+            let fd4 = -1; let fd5 = -1; let fd6 = -1; let fd7 = -1;
+            let fd8 = -1; let fd9 = -1;
+            let n = 0;
+            while (1 == 1) {
+                select {
+                    case new_fd = join_ch.recv(): {
+                        if (n == 0) { fd0 = new_fd; }
+                        else { if (n == 1) { fd1 = new_fd; }
+                        else { if (n == 2) { fd2 = new_fd; }
+                        else { if (n == 3) { fd3 = new_fd; }
+                        else { if (n == 4) { fd4 = new_fd; }
+                        else { if (n == 5) { fd5 = new_fd; }
+                        else { if (n == 6) { fd6 = new_fd; }
+                        else { if (n == 7) { fd7 = new_fd; }
+                        else { if (n == 8) { fd8 = new_fd; }
+                        else { fd9 = new_fd; };};};};};};};};};
+                        n = n + 1;
+                        printf("[Server] User #%d joined, total=%d\n", n, n);
+                        let welcome = "[Server] Welcome! You are User #" + itos(n);
+                        net.tcp_send(new_fd, welcome);
+                        let notice = "[Server] User #" + itos(n) + " joined the chat.";
+                        msg_ch.send(notice);
+                    }
+                    case msg = msg_ch.recv(): {
+                        if (n > 0) { net.tcp_send(fd0, msg); };
+                        if (n > 1) { net.tcp_send(fd1, msg); };
+                        if (n > 2) { net.tcp_send(fd2, msg); };
+                        if (n > 3) { net.tcp_send(fd3, msg); };
+                        if (n > 4) { net.tcp_send(fd4, msg); };
+                        if (n > 5) { net.tcp_send(fd5, msg); };
+                        if (n > 6) { net.tcp_send(fd6, msg); };
+                        if (n > 7) { net.tcp_send(fd7, msg); };
+                        if (n > 8) { net.tcp_send(fd8, msg); };
+                        if (n > 9) { net.tcp_send(fd9, msg); };
+                    }
+                    default: {
+                        std.sleep_ms(5);
+                    }
+                };
+            };
+        };
+
+        // Accept loop
+        while (1 == 1) {
+            let fd = net.tcp_accept(server_fd);
+            if (fd >= 0) {
+                count = count + 1;
+                let uid = count;
+                join_ch.send(fd);
+
+                // Spawn reader for this client
+                spawn {
+                    let alive = 1;
+                    while (alive == 1) {
+                        let data = net.tcp_recv(fd, 4096);
+                        if (strlen(data) == 0) {
+                            let leave = "[Server] User #" + itos(uid) + " left.";
+                            msg_ch.send(leave);
+                            printf("[Server] User #%d disconnected\n", uid);
+                            net.close(fd);
+                            alive = 0;
+                        } else {
+                            let broadcast = "[User#" + itos(uid) + "] " + data;
+                            printf("%s\n", broadcast);
+                            msg_ch.send(broadcast);
+                        };
+                    };
+                };
+            };
+        };
+    }
+}

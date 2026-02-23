@@ -99,6 +99,13 @@ static void collectRefsExpr(const Expr* e,
         collectRefsExpr(slen->target.get(), refs, locals);
         return;
     }
+    if (dynamic_cast<const ReadlnExpr*>(e)) {
+        return; // readln() 无子表达式
+    }
+    if (auto* it = dynamic_cast<const ItosExpr*>(e)) {
+        collectRefsExpr(it->value.get(), refs, locals);
+        return;
+    }
     if (auto* tn = dynamic_cast<const TypenameExpr*>(e)) {
         collectRefsExpr(tn->target.get(), refs, locals);
         return;
@@ -184,6 +191,38 @@ static void collectRefs(const ASTNode* node,
     }
     if (auto* ds = dynamic_cast<const DeleteStmt*>(node)) {
         collectRefsExpr(ds->target.get(), refs, locals);
+        return;
+    }
+    if (auto* ps = dynamic_cast<const PrintfStmt*>(node)) {
+        for (auto& e : ps->idents) collectRefsExpr(e.get(), refs, locals);
+        return;
+    }
+    if (auto* ss = dynamic_cast<const ScanfStmt*>(node)) {
+        for (auto& e : ss->idents) collectRefsExpr(e.get(), refs, locals);
+        return;
+    }
+    if (auto* rs = dynamic_cast<const ReturnStmt*>(node)) {
+        collectRefsExpr(rs->value.get(), refs, locals);
+        return;
+    }
+    if (auto* cr = dynamic_cast<const ChannelRecvStmt*>(node)) {
+        collectRefsExpr(cr->channel.get(), refs, locals);
+        locals.insert(cr->valName);
+        locals.insert(cr->okName);
+        return;
+    }
+    if (auto* frc = dynamic_cast<const ForRangeChannelStmt*>(node)) {
+        collectRefsExpr(frc->channel.get(), refs, locals);
+        locals.insert(frc->valName);
+        collectRefs(frc->body.get(), refs, locals);
+        return;
+    }
+    if (auto* sel = dynamic_cast<const SelectStmt*>(node)) {
+        for (auto& c : sel->cases) {
+            if (c->channel) collectRefsExpr(c->channel.get(), refs, locals);
+            if (c->sendValue) collectRefsExpr(c->sendValue.get(), refs, locals);
+            if (c->body) collectRefs(c->body.get(), refs, locals);
+        }
         return;
     }
     // 嵌套 spawn

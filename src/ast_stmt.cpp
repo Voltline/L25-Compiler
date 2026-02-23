@@ -1349,6 +1349,10 @@ llvm::Value* SelectStmt::codeGen(CodeGenContext& ctx) const
 
         } else if (cases[i]->kind == SelectCaseKind::Send) {
             llvm::Value* sendVal = cases[i]->sendValue->codeGen(ctx);
+            // 字符串需要深拷贝（channel 接收方独立拥有一份）
+            if (elemType.kind == SymbolKind::String && elemType.pointerLevel == 0) {
+                sendVal = emitStringDeepCopy(sendVal, ctx);
+            }
             llvm::AllocaInst* sendBuf = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "sel.send.buf");
             ctx.builder.CreateStore(sendVal, sendBuf);
             llvm::Value* sendCast = ctx.builder.CreateBitCast(sendBuf, i8PtrTy);

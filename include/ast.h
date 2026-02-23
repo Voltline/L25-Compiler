@@ -47,6 +47,8 @@ struct IdentExpr;
 struct FuncCallExpr;
 struct StringLiteralExpr;
 struct StrlenExpr;
+struct ReadlnExpr;
+struct ItosExpr;
 struct TypenameExpr;
 struct FieldCountExpr;
 struct MethodCountExpr;
@@ -783,6 +785,23 @@ struct StrlenExpr: public Expr
 {
     std::unique_ptr<Expr> target;
     explicit StrlenExpr(std::unique_ptr<Expr> target);
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// readln 内建函数节点（从 stdin 读取一行，返回字符串）
+struct ReadlnExpr: public Expr
+{
+    ReadlnExpr() = default;
+    void print(int indent = 0) const override;
+    llvm::Value* codeGen(CodeGenContext& ctx) const override;
+};
+
+// itos 内建函数节点（整数转字符串）
+struct ItosExpr: public Expr
+{
+    std::unique_ptr<Expr> value;
+    explicit ItosExpr(std::unique_ptr<Expr> value);
     void print(int indent = 0) const override;
     llvm::Value* codeGen(CodeGenContext& ctx) const override;
 };

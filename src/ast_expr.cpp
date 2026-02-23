@@ -1210,6 +1210,10 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
             if (mname == "send") {
                 llvm::Value* elemVal = args->args[0]->codeGen(ctx);
                 elemVal = castValueToType(elemVal, elemLLVMTy, ctx);
+                // 字符串需要深拷贝（channel 接收方独立拥有一份）
+                if (elemType.kind == SymbolKind::String && elemType.pointerLevel == 0) {
+                    elemVal = emitStringDeepCopy(elemVal, ctx);
+                }
                 llvm::AllocaInst* tmp = ctx.builder.CreateAlloca(elemLLVMTy, nullptr, "ch.send.tmp");
                 ctx.builder.CreateStore(elemVal, tmp);
                 llvm::Value* tmpCast = ctx.builder.CreateBitCast(tmp, i8PtrTy);

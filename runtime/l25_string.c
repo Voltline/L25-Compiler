@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdio.h>
 
 /* ===== String methods runtime =====
  * L25 strings are { i32 len, i8* data }.
@@ -103,4 +104,37 @@ int32_t l25_string_contains(const char* haystack, int32_t haystack_len,
     (void)haystack_len;
     (void)needle_len;
     return strstr(haystack, needle) ? 1 : 0;
+}
+
+/* readln(out_len) → char*  — reads one line from stdin */
+char* l25_readln(int32_t* out_len)
+{
+    char buf[4096];
+    if (!fgets(buf, sizeof(buf), stdin)) {
+        *out_len = 0;
+        char* r = (char*)malloc(1);
+        r[0] = '\0';
+        return r;
+    }
+    int32_t len = (int32_t)strlen(buf);
+    /* strip trailing newline */
+    while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) len--;
+    char* r = (char*)malloc((size_t)len + 1);
+    memcpy(r, buf, (size_t)len);
+    r[len] = '\0';
+    *out_len = len;
+    return r;
+}
+
+/* itos(val, out_len) → char*  — convert int to string */
+char* l25_itos(int32_t val, int32_t* out_len)
+{
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%d", val);
+    if (n < 0) n = 0;
+    *out_len = (int32_t)n;
+    char* r = (char*)malloc((size_t)n + 1);
+    memcpy(r, buf, (size_t)n);
+    r[n] = '\0';
+    return r;
 }

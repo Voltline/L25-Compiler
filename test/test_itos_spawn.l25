@@ -1,0 +1,35 @@
+program test_itos_spawn {
+    import net;
+    import std;
+
+    main {
+        let msg_ch: channel<string, 16>;
+        let join_ch: channel<int, 16>;
+
+        spawn {
+            let n = 0;
+            while (1 == 1) {
+                select {
+                    case new_fd = join_ch.recv(): {
+                        n = n + 1;
+                        let welcome = "[Server] Welcome #" + itos(n);
+                        printf("Welcome: %s\n", welcome);
+                        msg_ch.send(welcome);
+                    }
+                    case msg = msg_ch.recv(): {
+                        printf("Broadcast: %s\n", msg);
+                    }
+                    default: {
+                        std.sleep_ms(10);
+                    }
+                };
+            };
+        };
+
+        join_ch.send(100);
+        std.sleep_ms(200);
+        join_ch.send(200);
+        std.sleep_ms(200);
+        printf("Done\n");
+    }
+}
