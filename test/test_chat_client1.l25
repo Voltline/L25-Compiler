@@ -3,7 +3,7 @@ program chat_client {
     import std;
 
     main {
-        let fd = net.tcp_connect("127.0.0.1", 9000);
+        let fd = net.tcp_connect("127.0.0.1", 10000);
         if (fd < 0) {
             printf("Failed to connect to server\n");
             std.exit(1);

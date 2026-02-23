@@ -3,12 +3,12 @@ program chat_server {
     import std;
 
     main {
-        let server_fd = net.tcp_listen(9000);
+        let server_fd = net.tcp_listen(10000);
         if (server_fd < 0) {
             printf("Failed to start server\n");
             std.exit(1);
         };
-        printf("=== Chat Server started on port 9000 ===\n");
+        printf("=== Chat Server started on port 10000 ===\n");
 
         let count = 0;
         // Each client's fd is sent here; broadcaster maintains its own list
