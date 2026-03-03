@@ -13,6 +13,7 @@ std::unordered_map<std::string, llvm::StructType*> classStructTypes;
 std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
 std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
 std::unordered_map<std::string, std::vector<std::string>> classMethodNames;
+std::unordered_map<std::string, std::string> classBaseClass;
 
 // ===== L25 String 结构体类型 { i32 len, i8* data } =====
 llvm::StructType* getL25StringType(llvm::LLVMContext& ctx) {

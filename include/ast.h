@@ -118,6 +118,7 @@ extern std::unordered_map<std::string, llvm::StructType*> classStructTypes;
 extern std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> classFieldLayouts;
 extern std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
 extern std::unordered_map<std::string, std::vector<std::string>> classMethodNames;
+extern std::unordered_map<std::string, std::string> classBaseClass;
 TypeInfo evaluateExprType(const Expr* expr);
 
 // AST节点基类

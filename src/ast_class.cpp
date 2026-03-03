@@ -169,6 +169,21 @@ llvm::Value* DtorDecl::codeGen(CodeGenContext& ctx) const
     }
 
     emitScopeCleanup(ctx);
+
+    // 继承：链式调用基类析构函数
+    auto baseIt = classBaseClass.find(currentClassNameCodegen);
+    if (baseIt != classBaseClass.end()) {
+        std::string baseDtorName = buildDtorName(baseIt->second);
+        llvm::Function* baseDtorFn = ctx.module.getFunction(baseDtorName);
+        if (baseDtorFn) {
+            llvm::Value* thisVal = function->getArg(0);
+            llvm::StructType* baseTy = classStructTypes[baseIt->second];
+            llvm::Value* basePtr = ctx.builder.CreateBitCast(
+                thisVal, llvm::PointerType::get(baseTy, 0), "base.this");
+            ctx.builder.CreateCall(baseDtorFn, {basePtr});
+        }
+    }
+
     ctx.builder.CreateRetVoid();
     return function;
 }
@@ -370,6 +385,22 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
 
     std::vector<llvm::Type*> fieldTypes;
     std::vector<std::pair<std::string, TypeInfo>> layout;
+
+    // 继承：先添加基类字段
+    if (baseClass) {
+        auto baseLayoutIt = classFieldLayouts.find(baseClass->ident);
+        if (baseLayoutIt != classFieldLayouts.end()) {
+            for (const auto& [fname, ftype] : baseLayoutIt->second) {
+                llvm::Type* fieldType = typeInfoToLLVMType(ftype, ctx.context, true);
+                if (fieldType) {
+                    fieldTypes.push_back(fieldType);
+                    layout.emplace_back(fname, ftype);
+                }
+            }
+        }
+    }
+
+    // 子类自身的字段
     for (const auto& field : fields) {
         llvm::Type* fieldType = typeInfoToLLVMType(field->type, ctx.context, true);
         if (!fieldType) {
@@ -397,6 +428,93 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
         method->codeGen(ctx);
     }
     currentClassNameCodegen = saved;
+
+    // ===== 继承：为继承但未覆盖的方法生成转发包装函数 =====
+    if (baseClass) {
+        auto baseIt = classBaseClass.find(name->ident);
+        if (baseIt != classBaseClass.end()) {
+            const std::string& baseName = baseIt->second;
+            auto baseMNIt = classMethodNames.find(baseName);
+            if (baseMNIt != classMethodNames.end()) {
+                for (const auto& mname : baseMNIt->second) {
+                    // 跳过子类已覆盖的方法
+                    bool overridden = false;
+                    for (const auto& m : methods) {
+                        if (m->name->ident == mname) { overridden = true; break; }
+                    }
+                    if (overridden) continue;
+
+                    std::string baseFuncName = baseName + "." + mname;
+                    std::string derivedFuncName = name->ident + "." + mname;
+                    llvm::Function* baseMethod = ctx.module.getFunction(baseFuncName);
+                    if (!baseMethod || ctx.module.getFunction(derivedFuncName)) continue;
+
+                    auto* baseFnTy = baseMethod->getFunctionType();
+                    std::vector<llvm::Type*> wrapperArgTypes;
+                    wrapperArgTypes.push_back(llvm::PointerType::get(structTy, 0));
+                    for (unsigned i = 1; i < baseFnTy->getNumParams(); i++) {
+                        wrapperArgTypes.push_back(baseFnTy->getParamType(i));
+                    }
+                    auto* wrapperFnTy = llvm::FunctionType::get(
+                        baseFnTy->getReturnType(), wrapperArgTypes, false);
+                    auto* wrapperFn = llvm::Function::Create(
+                        wrapperFnTy, llvm::Function::ExternalLinkage, derivedFuncName, ctx.module);
+
+                    auto* wrapperEntry = llvm::BasicBlock::Create(ctx.context, "entry", wrapperFn);
+                    auto savedIP = ctx.builder.saveIP();
+                    ctx.builder.SetInsertPoint(wrapperEntry);
+
+                    llvm::Value* thisArg = wrapperFn->getArg(0);
+                    llvm::StructType* baseTy = classStructTypes[baseName];
+                    llvm::Value* baseThis = ctx.builder.CreateBitCast(
+                        thisArg, llvm::PointerType::get(baseTy, 0), "base.this");
+
+                    std::vector<llvm::Value*> callArgs;
+                    callArgs.push_back(baseThis);
+                    for (unsigned i = 1; i < wrapperFn->arg_size(); i++) {
+                        callArgs.push_back(wrapperFn->getArg(i));
+                    }
+
+                    if (baseFnTy->getReturnType()->isVoidTy()) {
+                        ctx.builder.CreateCall(baseMethod, callArgs);
+                        ctx.builder.CreateRetVoid();
+                    } else {
+                        auto* result = ctx.builder.CreateCall(baseMethod, callArgs, "inherited.call");
+                        ctx.builder.CreateRet(result);
+                    }
+                    ctx.builder.restoreIP(savedIP);
+                }
+            }
+
+            // 继承析构函数：若子类无 dtor 但基类有，生成转发 dtor
+            if (!dtor) {
+                std::string baseDtorName = buildDtorName(baseName);
+                llvm::Function* baseDtorFn = ctx.module.getFunction(baseDtorName);
+                if (baseDtorFn) {
+                    std::string dtorName = buildDtorName(name->ident);
+                    if (!ctx.module.getFunction(dtorName)) {
+                        auto* fnTy = llvm::FunctionType::get(
+                            llvm::Type::getVoidTy(ctx.context),
+                            {llvm::PointerType::get(structTy, 0)}, false);
+                        auto* fn = llvm::Function::Create(
+                            fnTy, llvm::Function::ExternalLinkage, dtorName, ctx.module);
+                        auto* dtorEntry = llvm::BasicBlock::Create(ctx.context, "entry", fn);
+                        auto savedIP2 = ctx.builder.saveIP();
+                        ctx.builder.SetInsertPoint(dtorEntry);
+
+                        llvm::Value* thisArg2 = fn->getArg(0);
+                        llvm::StructType* baseTy2 = classStructTypes[baseName];
+                        llvm::Value* basePtr = ctx.builder.CreateBitCast(
+                            thisArg2, llvm::PointerType::get(baseTy2, 0), "base.this");
+                        ctx.builder.CreateCall(baseDtorFn, {basePtr});
+                        ctx.builder.CreateRetVoid();
+
+                        ctx.builder.restoreIP(savedIP2);
+                    }
+                }
+            }
+        }
+    }
 
     // ===== 生成反射查找表 =====
     llvm::StructType* strTy = getL25StringType(ctx.context);

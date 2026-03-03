@@ -1,0 +1,92 @@
+program class_inherit {
+    class Animal {
+        let legs: int;
+        let speed: int;
+
+        Animal(l, s) {
+            this.legs = l;
+            this.speed = s;
+        }
+
+        func getLegs() -> int {
+            return this.legs;
+        }
+
+        func getSpeed() -> int {
+            return this.speed;
+        }
+
+        func describe() -> int {
+            printf("Animal: legs=%d speed=%d\n", this.legs, this.speed);
+            return 0;
+        }
+    }
+
+    class Dog extends Animal {
+        let name_id: int;
+
+        Dog(l, s, n) {
+            this.legs = l;
+            this.speed = s;
+            this.name_id = n;
+        }
+
+        // Override describe
+        func describe() -> int {
+            printf("Dog #%d: legs=%d speed=%d\n", this.name_id, this.legs, this.speed);
+            return 0;
+        }
+
+        func bark() -> int {
+            printf("Dog #%d: Woof!\n", this.name_id);
+            return 1;
+        }
+    }
+
+    class Puppy extends Dog {
+        let cuteness: int;
+
+        Puppy(n, c) {
+            this.legs = 4;
+            this.speed = 5;
+            this.name_id = n;
+            this.cuteness = c;
+        }
+
+        func getCuteness() -> int {
+            return this.cuteness;
+        }
+    }
+
+    main {
+        // Test 1: Base class with constructor
+        let a = new Animal(4, 30);
+        a.describe();
+        printf("Legs: %d, Speed: %d\n", a.getLegs(), a.getSpeed());
+
+        // Test 2: Derived class with override + new method
+        let d = new Dog(4, 40, 1);
+        d.describe();
+        d.bark();
+        printf("Dog legs: %d\n", d.getLegs());
+
+        // Test 3: Multi-level inheritance
+        let p = new Puppy(2, 100);
+        p.describe();
+        p.bark();
+        printf("Puppy legs: %d, cuteness: %d\n", p.getLegs(), p.getCuteness());
+
+        // Test 4: Stack-allocated class
+        let a2: Animal;
+        a2.legs = 8;
+        a2.speed = 10;
+        printf("Spider: legs=%d speed=%d\n", a2.legs, a2.speed);
+
+        let d2: Dog;
+        d2.legs = 4;
+        d2.speed = 50;
+        d2.name_id = 3;
+        d2.bark();
+        printf("Dog2 speed: %d\n", d2.getSpeed());
+    }
+}

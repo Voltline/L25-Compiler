@@ -138,10 +138,59 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
             continue;
         }
         SymbolInfo classInfo{ SymbolKind::Class, className };
-        for (const auto& field : cls->fields) {
-            classInfo.classFields.emplace_back(field->name->ident, field->type);
+
+        // ===== 继承处理 =====
+        std::string baseName;
+        if (cls->baseClass) {
+            baseName = cls->baseClass->ident;
+            SymbolInfo* baseSym = currentScope->lookup(baseName);
+            if (!baseSym || baseSym->kind != SymbolKind::Class) {
+                reportError(*cls, "基类不存在或不是类类型：" + baseName);
+                continue;
+            }
+            // 检查循环继承
+            std::string cur = baseName;
+            bool circular = false;
+            while (!cur.empty()) {
+                if (cur == className) {
+                    reportError(*cls, "循环继承：" + className);
+                    circular = true;
+                    break;
+                }
+                auto it = classBaseClass.find(cur);
+                cur = (it != classBaseClass.end()) ? it->second : "";
+            }
+            if (circular) continue;
+
+            // 继承基类字段
+            classInfo.classFields = baseSym->classFields;
+            // 继承基类方法（后面会被子类覆盖）
+            classInfo.methodParamTypes = baseSym->methodParamTypes;
+            classInfo.methodReturnTypes = baseSym->methodReturnTypes;
+            // 继承析构函数标记
+            if (baseSym->hasDestructor) classInfo.hasDestructor = true;
+            // 记录继承关系
+            classBaseClass[className] = baseName;
         }
-        classInfo.hasDestructor = static_cast<bool>(cls->dtor);
+
+        // 添加子类自身的字段（检查与基类字段重名）
+        for (const auto& field : cls->fields) {
+            bool duplicate = false;
+            for (const auto& [fname, ftype] : classInfo.classFields) {
+                if (fname == field->name->ident) {
+                    reportError(*field, "字段与基类字段重名：" + field->name->ident);
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                classInfo.classFields.emplace_back(field->name->ident, field->type);
+            }
+        }
+
+        classInfo.hasDestructor = classInfo.hasDestructor || static_cast<bool>(cls->dtor);
+
+        // 添加/覆盖子类自身的方法
         for (const auto& method : cls->methods) {
             std::vector<TypeInfo> params;
             if (method->params) {
@@ -155,10 +204,19 @@ void SemanticAnalyzer::analyzeProgram(Program& program)
         declareSymbol(className, classInfo);
         classFieldLayouts[className] = classInfo.classFields;
         classMethodReturnTypes[className] = classInfo.methodReturnTypes;
-        // 按定义顺序记录方法名（供反射使用）
+
+        // 按定义顺序记录方法名（继承 + 新增）
         std::vector<std::string> methodNames;
+        if (cls->baseClass && !baseName.empty()) {
+            auto baseNamesIt = classMethodNames.find(baseName);
+            if (baseNamesIt != classMethodNames.end()) {
+                methodNames = baseNamesIt->second;
+            }
+        }
         for (const auto& method : cls->methods) {
-            methodNames.push_back(method->name->ident);
+            if (std::find(methodNames.begin(), methodNames.end(), method->name->ident) == methodNames.end()) {
+                methodNames.push_back(method->name->ident);
+            }
         }
         classMethodNames[className] = methodNames;
         classDecls[className] = cls.get();
@@ -222,6 +280,20 @@ void SemanticAnalyzer::analyzeClass(ClassDecl& cls)
     cls.scope = currentScope;
     currentClass = &cls;
     enterScope();
+
+    // 注册继承的基类字段
+    if (cls.baseClass) {
+        SymbolInfo* baseSym = rootScope ? rootScope->lookup(cls.baseClass->ident) : nullptr;
+        if (baseSym && baseSym->kind == SymbolKind::Class) {
+            for (const auto& [fname, ftype] : baseSym->classFields) {
+                if (!checkSameScopeSymbolExists(fname)) {
+                    SymbolInfo info{ fname, ftype };
+                    declareSymbol(fname, info);
+                }
+            }
+        }
+    }
+
     // 注册字段
     for (const auto& field : cls.fields) {
         if (checkSameScopeSymbolExists(field->name->ident)) {
@@ -333,12 +405,15 @@ void SemanticAnalyzer::analyzeStmt(Stmt& stmt)
             reportError(*decl, "变量重定义：" + decl->name->ident);
         } else {
             TypeInfo declType = decl->name->type;
-            // 自动推导：如果类型为默认 Int 且 RHS 是字符串字面量，推导为 String
+            // 自动推导：如果类型为默认 Int 且 RHS 是字符串字面量，推导为 String；
+            //           如果 RHS 是 new 表达式，推导为 *ClassName
             if (declType.kind == SymbolKind::Int && declType.pointerLevel == 0 && decl->expr) {
                 TypeInfo rhsType = evaluateExprType(decl->expr.get());
                 if (rhsType.kind == SymbolKind::String) {
                     declType = TypeInfo{ SymbolKind::String, {}, 0, false };
-                    // 同步更新 AST 节点的类型
+                    const_cast<IdentExpr*>(decl->name.get())->type = declType;
+                } else if (rhsType.kind == SymbolKind::Class && !rhsType.className.empty()) {
+                    declType = rhsType;
                     const_cast<IdentExpr*>(decl->name.get())->type = declType;
                 }
             }
