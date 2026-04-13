@@ -1031,7 +1031,7 @@ Destructors follow the C++-like `~ClassName() { ... }` form (no parameters). Use
 - `this` can only be used inside class methods, constructors and destructors.
 - Class methods do **not** support overloading.
 - All class fields must be declared explicitly using `let`.
-- The `extends` keyword is parsed but inheritance semantics (field/method resolution from base class) are **not yet implemented**.
+- The `extends` keyword supports single-class inheritance: derived classes inherit all fields and methods from the base class, and can override methods. Virtual dispatch (vtable-based polymorphism) is supported for pointer-type variables — a `*Base` pointer holding a derived object will call the derived class's overriding method at runtime.
 - No access modifiers (`public` / `private`) are supported.
 - Classes are passed by reference-like semantics when used as variables.
 - Member access and method calls are left-associative:

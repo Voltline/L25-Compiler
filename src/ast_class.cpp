@@ -3,6 +3,7 @@
 #include "errorReporter.h"
 #include <llvm/IR/Type.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <algorithm>
 
 // 当前正在代码生成的类名（仅本文件使用）
 static std::string currentClassNameCodegen;
@@ -416,6 +417,25 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
     // 生成 GC 扫描函数（在设置字段布局后、生成方法前）
     emitGCScanFunction(ctx, name->ident);
 
+    // ===== 提前计算 vtable 方法槽顺序（供方法体内虚函数分发使用）=====
+    {
+        std::vector<std::string> vtableSlots;
+        auto baseIt = classBaseClass.find(name->ident);
+        if (baseIt != classBaseClass.end()) {
+            auto baseSlotIt = classVtableSlots.find(baseIt->second);
+            if (baseSlotIt != classVtableSlots.end()) {
+                vtableSlots = baseSlotIt->second;
+            }
+        }
+        for (const auto& m : methods) {
+            const std::string& mname = m->name->ident;
+            if (std::find(vtableSlots.begin(), vtableSlots.end(), mname) == vtableSlots.end()) {
+                vtableSlots.push_back(mname);
+            }
+        }
+        classVtableSlots[name->ident] = vtableSlots;
+    }
+
     std::string saved = currentClassNameCodegen;
     currentClassNameCodegen = name->ident;
     for (const auto& ctor : ctors) {
@@ -513,6 +533,36 @@ llvm::Value* ClassDecl::codeGen(CodeGenContext& ctx) const
                     }
                 }
             }
+        }
+    }
+
+    // ===== 生成 vtable 全局变量（支持多态虚函数分发） =====
+    {
+        auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+
+        // 方法槽已在方法生成前提前计算（classVtableSlots[name->ident]），直接使用
+        const auto& vtableSlots = classVtableSlots[name->ident];
+
+        // 为每个槽找到对应的函数（优先使用本类实现，否则回退到继承的包装函数）
+        if (!vtableSlots.empty()) {
+            std::vector<llvm::Constant*> entries;
+            for (const auto& mname : vtableSlots) {
+                // 本类方法：ClassName.mname
+                std::string funcName = name->ident + "." + mname;
+                llvm::Function* fn = ctx.module.getFunction(funcName);
+                if (fn) {
+                    entries.push_back(llvm::ConstantExpr::getBitCast(fn, i8PtrTy));
+                } else {
+                    entries.push_back(llvm::ConstantPointerNull::get(
+                        static_cast<llvm::PointerType*>(i8PtrTy)));
+                }
+            }
+            auto* arrTy = llvm::ArrayType::get(i8PtrTy, entries.size());
+            auto* arrConst = llvm::ConstantArray::get(arrTy, entries);
+            new llvm::GlobalVariable(
+                ctx.module, arrTy, true,
+                llvm::GlobalValue::ExternalLinkage, arrConst,
+                "__l25_vtable_" + name->ident);
         }
     }
 
