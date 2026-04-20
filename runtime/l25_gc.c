@@ -20,6 +20,7 @@ typedef struct GCObject {
     uint8_t          dead;       // delete 已调用析构（sweep 时跳过 dtor）
     l25_gc_scan_fn   scan_fn;    // 扫描函数（NULL = 无指针字段）
     l25_gc_dtor_fn   dtor_fn;    // 析构函数（NULL = 无需析构）
+    void**           vtable;     // 虚函数表指针（NULL = 无虚表）
 } GCObject;
 
 // ===== 每线程根栈 =====
@@ -368,7 +369,7 @@ void l25_gc_shutdown(void) {
 }
 
 // ===== 分配 GC 管理的对象（线程安全） =====
-void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) {
+void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn, void** vtable) {
     pthread_mutex_lock(&gc_lock);
 
     // 自适应步进
@@ -394,6 +395,7 @@ void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) 
     o->size      = size;
     o->scan_fn   = scan_fn;
     o->dtor_fn   = dtor_fn;
+    o->vtable    = vtable;
     o->gray_next = NULL;
     o->dead      = 0;
 
@@ -413,6 +415,12 @@ void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn) 
     void* result = get_user_ptr(o);
     pthread_mutex_unlock(&gc_lock);
     return result;
+}
+
+// ===== 获取虚函数表 =====
+void** l25_gc_get_vtable(void* ptr) {
+    if (!ptr) return NULL;
+    return get_header(ptr)->vtable;
 }
 
 // ===== 兼容接口 =====

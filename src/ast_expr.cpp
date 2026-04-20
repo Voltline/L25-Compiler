@@ -1377,6 +1377,44 @@ llvm::Value* MethodCallExpr::codeGen(CodeGenContext& ctx) const
             callArgs.push_back(arg->codeGen(ctx));
         }
     }
+
+    // ===== 方案A：vtable 动态分发（仅当通过指针调用且有 vtable 时）=====
+    // 当目标静态类型为指针类（pointerLevel > 0），尝试通过 vtable 实现多态分发
+    if (baseType.pointerLevel > 0) {
+        auto slotIt = classVtableSlots.find(baseType.className);
+        if (slotIt != classVtableSlots.end()) {
+            const auto& slots = slotIt->second;
+            auto sit = std::find(slots.begin(), slots.end(), method->ident);
+            if (sit != slots.end()) {
+                int slotIdx = static_cast<int>(sit - slots.begin());
+                // 找到静态 callee 以获取函数类型
+                std::string funcName = baseType.className + "." + method->ident;
+                llvm::Function* callee = ctx.module.getFunction(funcName);
+                if (callee) {
+                    auto* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+                    auto* i32Ty = llvm::Type::getInt32Ty(ctx.context);
+                    // 获取对象原始 i8* 指针（用于调用 l25_gc_get_vtable）
+                    llvm::Value* rawObjPtr = ctx.builder.CreateBitCast(thisPtr, i8PtrTy, "vtdisp.raw");
+                    ensureGCRuntimeDeclared(ctx);
+                    llvm::Function* getVtableFn = ctx.module.getFunction("l25_gc_get_vtable");
+                    // vtbl = l25_gc_get_vtable(rawObjPtr) -> i8**
+                    llvm::Value* vtbl = ctx.builder.CreateCall(getVtableFn, {rawObjPtr}, "vtbl");
+                    // slot_ptr = GEP vtbl[slotIdx]
+                    llvm::Value* slotIdxVal = llvm::ConstantInt::get(i32Ty, slotIdx);
+                    llvm::Value* slotPtr = ctx.builder.CreateGEP(i8PtrTy, vtbl, slotIdxVal, "vtbl.slot");
+                    // fn_raw = load i8* from slotPtr
+                    llvm::Value* fnRaw = ctx.builder.CreateLoad(i8PtrTy, slotPtr, "vtbl.fnraw");
+                    // 将函数指针转型为静态 callee 的函数类型（基类签名）
+                    auto* calleeFnPtrTy = llvm::PointerType::get(callee->getFunctionType(), 0);
+                    llvm::Value* fnPtr = ctx.builder.CreateBitCast(fnRaw, calleeFnPtrTy, "vtbl.fnptr");
+                    // 间接调用
+                    return ctx.builder.CreateCall(callee->getFunctionType(), fnPtr, callArgs, "vtdisp.call");
+                }
+            }
+        }
+    }
+
+    // 静态分发（栈对象或 vtable 中未找到该方法时的回退）
     std::string funcName = baseType.className + "." + method->ident;
     llvm::Function* callee = ctx.module.getFunction(funcName);
     if (!callee) {
@@ -1406,9 +1444,10 @@ llvm::Value* NewExpr::codeGen(CodeGenContext& ctx) const
     }
 
     llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
     llvm::Type* sizeTy = llvm::Type::getInt64Ty(ctx.context);
 
-    // GC 分配：l25_gc_alloc(size, scan_fn, dtor_fn)
+    // GC 分配：l25_gc_alloc(size, scan_fn, dtor_fn, vtable)
     ensureGCRuntimeDeclared(ctx);
     uint64_t allocSize = ctx.module.getDataLayout().getTypeAllocSize(classTy);
     llvm::Value* sizeVal = llvm::ConstantInt::get(sizeTy, allocSize);
@@ -1427,7 +1466,19 @@ llvm::Value* NewExpr::codeGen(CodeGenContext& ctx) const
         : llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy));
 
     llvm::FunctionCallee gcAllocFn = ctx.module.getFunction("l25_gc_alloc");
-    llvm::Value* rawPtr = ctx.builder.CreateCall(gcAllocFn, { sizeVal, scanFnPtr, dtorFnPtr }, "rawobj");
+
+    // 查找本类的 vtable 全局变量（如果存在）
+    llvm::Value* vtablePtrArg = llvm::ConstantPointerNull::get(
+        static_cast<llvm::PointerType*>(i8PtrPtrTy));
+    {
+        llvm::GlobalVariable* vtableGV = ctx.module.getGlobalVariable(
+            "__l25_vtable_" + className->ident);
+        if (vtableGV) {
+            vtablePtrArg = ctx.builder.CreateBitCast(vtableGV, i8PtrPtrTy, "vtable");
+        }
+    }
+
+    llvm::Value* rawPtr = ctx.builder.CreateCall(gcAllocFn, { sizeVal, scanFnPtr, dtorFnPtr, vtablePtrArg }, "rawobj");
     llvm::Value* typedPtr = ctx.builder.CreateBitCast(rawPtr, llvm::PointerType::get(classTy, 0), "obj");
 
     size_t argCount = args ? args->args.size() : 0;
@@ -1503,16 +1554,18 @@ llvm::Value* NewArrayExpr::codeGen(CodeGenContext& ctx) const
         : llvm::Type::getInt32Ty(ctx.context);
     uint64_t elemSize = ctx.module.getDataLayout().getTypeAllocSize(elemTy);
 
-    // GC 分配：l25_gc_alloc(totalSize, NULL, NULL)
-    // 基本类型数组无指针字段（不需要 scan）、无析构函数
+    // GC 分配：l25_gc_alloc(totalSize, NULL, NULL, NULL)
+    // 基本类型数组无指针字段（不需要 scan）、无析构函数、无 vtable
     ensureGCRuntimeDeclared(ctx);
     llvm::Type* i8PtrTy = llvm::PointerType::get(llvm::Type::getInt8Ty(ctx.context), 0);
+    llvm::Type* i8PtrPtrTy = llvm::PointerType::get(i8PtrTy, 0);
     llvm::Value* elemSizeVal = llvm::ConstantInt::get(i64Ty, elemSize);
     llvm::Value* totalSize = ctx.builder.CreateMul(sizeVal, elemSizeVal, "newarr.totalsize");
     llvm::Value* nullPtr = llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrTy));
+    llvm::Value* nullVtable = llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8PtrPtrTy));
 
     llvm::FunctionCallee gcAllocFn = ctx.module.getFunction("l25_gc_alloc");
-    llvm::Value* rawPtr = ctx.builder.CreateCall(gcAllocFn, {totalSize, nullPtr, nullPtr}, "newarr.raw");
+    llvm::Value* rawPtr = ctx.builder.CreateCall(gcAllocFn, {totalSize, nullPtr, nullPtr, nullVtable}, "newarr.raw");
 
     // 转换为目标指针类型
     llvm::Type* ptrTy = llvm::PointerType::get(elemTy, 0);

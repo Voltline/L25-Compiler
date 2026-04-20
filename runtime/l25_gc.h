@@ -35,7 +35,11 @@ void l25_gc_root_push(void** slot);
 void l25_gc_root_pop(void);
 
 // 分配 GC 管理的对象（线程安全）
-void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn);
+// vtable: 类的虚函数表指针（NULL 表示无虚函数表，如数组）
+void* l25_gc_alloc(size_t size, l25_gc_scan_fn scan_fn, l25_gc_dtor_fn dtor_fn, void** vtable);
+
+// 获取 GC 对象的虚函数表指针（如果不是 GC 管理的对象则行为未定义）
+void** l25_gc_get_vtable(void* ptr);
 
 // 注册 / 移除 GC 根（兼容接口，内部转发到 root_push/pop）
 void l25_gc_add_root(void** root);

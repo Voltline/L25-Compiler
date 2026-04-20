@@ -119,6 +119,8 @@ extern std::unordered_map<std::string, std::vector<std::pair<std::string, TypeIn
 extern std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
 extern std::unordered_map<std::string, std::vector<std::string>> classMethodNames;
 extern std::unordered_map<std::string, std::string> classBaseClass;
+// classVtableSlots: 每个类的 vtable 方法槽顺序（含继承槽），用于虚函数动态分发
+extern std::unordered_map<std::string, std::vector<std::string>> classVtableSlots;
 TypeInfo evaluateExprType(const Expr* expr);
 
 // AST节点基类

@@ -14,6 +14,7 @@ std::unordered_map<std::string, std::vector<std::pair<std::string, TypeInfo>>> c
 std::unordered_map<std::string, std::unordered_map<std::string, TypeInfo>> classMethodReturnTypes;
 std::unordered_map<std::string, std::vector<std::string>> classMethodNames;
 std::unordered_map<std::string, std::string> classBaseClass;
+std::unordered_map<std::string, std::vector<std::string>> classVtableSlots;
 
 // ===== L25 String 结构体类型 { i32 len, i8* data } =====
 llvm::StructType* getL25StringType(llvm::LLVMContext& ctx) {
@@ -984,10 +985,15 @@ void ensureGCRuntimeDeclared(CodeGenContext& ctx)
         ctx.module.getOrInsertFunction("l25_gc_shutdown",
             llvm::FunctionType::get(voidTy, {}, false));
     }
-    // l25_gc_alloc(size, scan_fn, dtor_fn) → i8*
+    // l25_gc_alloc(size, scan_fn, dtor_fn, vtable) → i8*
     if (!ctx.module.getFunction("l25_gc_alloc")) {
         ctx.module.getOrInsertFunction("l25_gc_alloc",
-            llvm::FunctionType::get(i8PtrTy, {i64Ty, i8PtrTy, i8PtrTy}, false));
+            llvm::FunctionType::get(i8PtrTy, {i64Ty, i8PtrTy, i8PtrTy, i8PtrPtrTy}, false));
+    }
+    // l25_gc_get_vtable(i8*) → i8**
+    if (!ctx.module.getFunction("l25_gc_get_vtable")) {
+        ctx.module.getOrInsertFunction("l25_gc_get_vtable",
+            llvm::FunctionType::get(i8PtrPtrTy, {i8PtrTy}, false));
     }
     // l25_gc_add_root(void** root)
     if (!ctx.module.getFunction("l25_gc_add_root")) {

@@ -1,0 +1,77 @@
+program test_polymorphism {
+    class Shape {
+        let color: int;
+
+        Shape(c) {
+            this.color = c;
+        }
+
+        func area() -> int {
+            return 0;
+        }
+
+        func describe() -> int {
+            printf("Shape color=%d area=%d\n", this.color, this.area());
+            return 0;
+        }
+    }
+
+    class Circle extends Shape {
+        let radius: int;
+
+        Circle(c, r) {
+            this.color = c;
+            this.radius = r;
+        }
+
+        func area() -> int {
+            return this.radius * this.radius * 3;
+        }
+    }
+
+    class Rectangle extends Shape {
+        let width: int;
+        let height: int;
+
+        Rectangle(c, w, h) {
+            this.color = c;
+            this.width = w;
+            this.height = h;
+        }
+
+        func area() -> int {
+            return this.width * this.height;
+        }
+    }
+
+    // 计算所有图形面积之和（通过基类指针调用）
+    func sumArea(s: *Shape) -> int {
+        return s.area();
+    }
+
+    main {
+        // Test 1: 基类指针持有派生类对象 — 虚函数分发
+        let c: *Shape = new Circle(1, 5);
+        let r: *Shape = new Rectangle(2, 4, 6);
+
+        output(c.area());   // Circle.area: 5*5*3 = 75
+        output(r.area());   // Rectangle.area: 4*6 = 24
+
+        // Test 2: 通过基类指针调用含虚调用的基类方法
+        let tmp = c.describe();   // "Shape color=1 area=75"
+        tmp = r.describe();       // "Shape color=2 area=24"
+
+        // Test 3: 经函数参数传递基类指针
+        output(sumArea(c));   // 75
+        output(sumArea(r));   // 24
+
+        // Test 4: 直接用派生类指针（静态分发，与之前相同）
+        let c2: *Circle = new Circle(3, 2);
+        output(c2.area());  // 2*2*3 = 12
+
+        // Test 5: 三层继承多态
+        let c3: *Circle = new Circle(4, 10);
+        let s: *Shape = c3;
+        output(s.area());  // 10*10*3 = 300
+    }
+}
